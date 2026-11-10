@@ -1,0 +1,232 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isSuperAdmin() {
+      return isSignedIn()
+        && request.auth.token.email == 'mazharhajid@gmail.com'
+        && request.auth.token.email_verified == true;
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128;
+    }
+
+    function isNonEmptyString(val, maxLen) {
+      return val is string && val.size() >= 1 && val.size() <= maxLen;
+    }
+
+    // ===============================================================
+    // Validation Functions
+    // ===============================================================
+    function isValidProgram(data, docId) {
+      return data.keys().hasAll([
+          'id', 'title', 'arabicTitle', 'subtitle', 'category', 'levelBadge',
+          'durationWeeks', 'sessionsPerWeek', 'sessionMinutes',
+          'scheduleDays', 'scheduleTime', 'tuitionIDR',
+          'summary', 'targetOutcome', 'kitabReference', 'imageKey', 'order'
+        ])
+        && data.keys().hasOnly([
+          'id', 'title', 'arabicTitle', 'subtitle', 'category', 'levelBadge',
+          'durationWeeks', 'sessionsPerWeek', 'sessionMinutes',
+          'scheduleDays', 'scheduleTime', 'tuitionIDR',
+          'summary', 'targetOutcome', 'kitabReference', 'imageKey', 'featured', 'registrationOpen', 'angkatan', 'order', 'updatedAt'
+        ])
+        && data.id == docId
+        && isNonEmptyString(data.title, 140)
+        && isNonEmptyString(data.arabicTitle, 140)
+        && isNonEmptyString(data.subtitle, 200)
+        && (data.category == 'Ilmu Nahwu' || data.category == 'Ilmu Shorof')
+        && isNonEmptyString(data.levelBadge, 100)
+        && data.durationWeeks is int && data.durationWeeks >= 1 && data.durationWeeks <= 104
+        && data.sessionsPerWeek is int && data.sessionsPerWeek >= 1 && data.sessionsPerWeek <= 14
+        && data.sessionMinutes is int && data.sessionMinutes >= 15 && data.sessionMinutes <= 360
+        && isNonEmptyString(data.scheduleDays, 120)
+        && isNonEmptyString(data.scheduleTime, 120)
+        && data.tuitionIDR is int && data.tuitionIDR >= 0 && data.tuitionIDR <= 100000000
+        && isNonEmptyString(data.summary, 2000)
+        && isNonEmptyString(data.targetOutcome, 1000)
+        && isNonEmptyString(data.kitabReference, 300)
+        && (data.imageKey == 'turats' || data.imageKey == 'hiwar')
+        && data.order is int && data.order >= 1 && data.order <= 100
+        && (!('featured' in data) || data.featured is bool)
+        && (!('registrationOpen' in data) || data.registrationOpen is bool)
+        && (!('angkatan' in data) || isNonEmptyString(data.angkatan, 100))
+        && (!('updatedAt' in data) || data.updatedAt is timestamp || isNonEmptyString(data.updatedAt, 64));
+    }
+
+    function isValidSchedule(data, docId) {
+      return data.keys().hasAll([
+          'id', 'programId', 'programName', 'batchCode', 'mode',
+          'days', 'timeWIB', 'startDate', 'instructor',
+          'capacity', 'enrolled', 'feeIDR', 'order'
+        ])
+        && data.keys().hasOnly([
+          'id', 'programId', 'programName', 'batchCode', 'mode',
+          'days', 'timeWIB', 'startDate', 'instructor',
+          'capacity', 'enrolled', 'feeIDR', 'order', 'updatedAt'
+        ])
+        && data.id == docId
+        && isNonEmptyString(data.programId, 128)
+        && isNonEmptyString(data.programName, 160)
+        && isNonEmptyString(data.batchCode, 80)
+        && isNonEmptyString(data.mode, 120)
+        && isNonEmptyString(data.days, 120)
+        && isNonEmptyString(data.timeWIB, 120)
+        && isNonEmptyString(data.startDate, 100)
+        && isNonEmptyString(data.instructor, 140)
+        && data.capacity is int && data.capacity >= 1 && data.capacity <= 1000
+        && data.enrolled is int && data.enrolled >= 0 && data.enrolled <= data.capacity
+        && data.feeIDR is int && data.feeIDR >= 0 && data.feeIDR <= 100000000
+        && data.order is int && data.order >= 1 && data.order <= 200
+        && (!('updatedAt' in data) || data.updatedAt is timestamp || isNonEmptyString(data.updatedAt, 64));
+    }
+
+    function isValidRegistration(data, docId) {
+      return data.keys().hasAll([
+          'registrationNumber', 'fullName', 'email', 'whatsapp', 'city',
+          'occupation', 'selectedProgramId', 'selectedProgramName',
+          'selectedScheduleId', 'selectedScheduleSummary', 'learningGoal',
+          'totalTuitionIDR', 'registeredAt', 'status'
+        ])
+        && data.keys().hasOnly([
+          'registrationNumber', 'fullName', 'gender', 'email', 'whatsapp', 'city',
+          'occupation', 'selectedProgramId', 'selectedProgramName',
+          'selectedScheduleId', 'selectedScheduleSummary', 'learningGoal',
+          'totalTuitionIDR', 'registeredAt', 'status', 'createdAt', 'updatedAt'
+        ])
+        && data.registrationNumber == docId
+        && isNonEmptyString(data.fullName, 120)
+        && (!('gender' in data) || isNonEmptyString(data.gender, 40))
+        && isNonEmptyString(data.email, 160)
+        && isNonEmptyString(data.whatsapp, 40)
+        && isNonEmptyString(data.city, 100)
+        && isNonEmptyString(data.occupation, 100)
+        && isNonEmptyString(data.selectedProgramId, 128)
+        && isNonEmptyString(data.selectedProgramName, 160)
+        && isNonEmptyString(data.selectedScheduleId, 128)
+        && isNonEmptyString(data.selectedScheduleSummary, 240)
+        && isNonEmptyString(data.learningGoal, 1500)
+        && data.totalTuitionIDR is int && data.totalTuitionIDR >= 0 && data.totalTuitionIDR <= 100000000
+        && isNonEmptyString(data.registeredAt, 80)
+        && isNonEmptyString(data.status, 120)
+        && (!('createdAt' in data) || data.createdAt is timestamp || isNonEmptyString(data.createdAt, 64))
+        && (!('updatedAt' in data) || data.updatedAt is timestamp || isNonEmptyString(data.updatedAt, 64));
+    }
+
+    function isValidPublicStatus(data, docId) {
+      return data.keys().hasAll([
+          'registrationNumber', 'fullName', 'city', 'occupation',
+          'selectedProgramId', 'selectedProgramName',
+          'selectedScheduleId', 'selectedScheduleSummary',
+          'totalTuitionIDR', 'registeredAt', 'status'
+        ])
+        && data.keys().hasOnly([
+          'registrationNumber', 'fullName', 'gender', 'city', 'occupation',
+          'selectedProgramId', 'selectedProgramName',
+          'selectedScheduleId', 'selectedScheduleSummary',
+          'totalTuitionIDR', 'registeredAt', 'status', 'createdAt', 'updatedAt'
+        ])
+        && data.registrationNumber == docId
+        && isNonEmptyString(data.fullName, 120)
+        && (!('gender' in data) || isNonEmptyString(data.gender, 40))
+        && isNonEmptyString(data.city, 100)
+        && isNonEmptyString(data.occupation, 100)
+        && isNonEmptyString(data.selectedProgramId, 128)
+        && isNonEmptyString(data.selectedProgramName, 160)
+        && isNonEmptyString(data.selectedScheduleId, 128)
+        && isNonEmptyString(data.selectedScheduleSummary, 240)
+        && data.totalTuitionIDR is int && data.totalTuitionIDR >= 0 && data.totalTuitionIDR <= 100000000
+        && isNonEmptyString(data.registeredAt, 80)
+        && isNonEmptyString(data.status, 120)
+        && (!('createdAt' in data) || data.createdAt is timestamp || isNonEmptyString(data.createdAt, 64))
+        && (!('updatedAt' in data) || data.updatedAt is timestamp || isNonEmptyString(data.updatedAt, 64));
+    }
+
+    // ===============================================================
+    // Collection Rules
+    // ===============================================================
+
+    match /programs/{programId} {
+      allow get: if isValidId(programId);
+      allow list: if existing().order >= 1;
+      allow create: if isSuperAdmin() && isValidId(programId) && isValidProgram(incoming(), programId);
+      allow update: if isSuperAdmin()
+        && isValidId(programId)
+        && isValidProgram(incoming(), programId)
+        && incoming().id == existing().id;
+      allow delete: if isSuperAdmin() && isValidId(programId);
+    }
+
+    match /schedules/{scheduleId} {
+      allow get: if isValidId(scheduleId);
+      allow list: if existing().order >= 1;
+      allow create: if isSuperAdmin() && isValidId(scheduleId) && isValidSchedule(incoming(), scheduleId);
+      allow update: if isSuperAdmin()
+        && isValidId(scheduleId)
+        && isValidSchedule(incoming(), scheduleId)
+        && incoming().id == existing().id;
+      allow delete: if isSuperAdmin() && isValidId(scheduleId);
+    }
+
+    // Private PII collection: only Superadmin can read/list/update/delete; public can create with strict validation
+    match /registrations/{registrationId} {
+      allow get: if isSuperAdmin() && isValidId(registrationId);
+      allow list: if isSuperAdmin() && existing().totalTuitionIDR >= 0;
+      allow create: if isValidId(registrationId)
+        && isValidRegistration(incoming(), registrationId)
+        && (
+          isSuperAdmin()
+          || (
+            incoming().status == 'Terverifikasi — Menunggu Orientasi'
+            && incoming().totalTuitionIDR >= 10000
+          )
+        );
+      allow update: if isSuperAdmin()
+        && isValidId(registrationId)
+        && isValidRegistration(incoming(), registrationId)
+        && incoming().registrationNumber == existing().registrationNumber;
+      allow delete: if isSuperAdmin() && isValidId(registrationId);
+    }
+
+    // Sanitized non-PII status collection: public lookup & creation allowed, only Superadmin can update/delete
+    match /registrationStatuses/{registrationId} {
+      allow get: if isValidId(registrationId);
+      allow list: if existing().totalTuitionIDR >= 0;
+      allow create: if isValidId(registrationId)
+        && isValidPublicStatus(incoming(), registrationId)
+        && (
+          isSuperAdmin()
+          || (
+            incoming().status == 'Terverifikasi — Menunggu Orientasi'
+            && incoming().totalTuitionIDR >= 10000
+          )
+        );
+      allow update: if isSuperAdmin()
+        && isValidId(registrationId)
+        && isValidPublicStatus(incoming(), registrationId)
+        && incoming().registrationNumber == existing().registrationNumber;
+      allow delete: if isSuperAdmin() && isValidId(registrationId);
+    }
+
+    // Default deny for everything else
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Ma'had Al-Bayan — Pendaftaran Pembelajaran Bahasa Arab",
+  "description": "Portal pendaftaran resmi, tes penempatan (placement test) interaktif, dan informasi kurikulum pembelajaran Bahasa Arab Fusha, Turats, dan Percakapan.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

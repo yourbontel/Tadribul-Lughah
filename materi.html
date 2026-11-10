@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="id">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Materi & Modul Pembelajaran (materi.html) — Tadribul Lughah</title>
+    <meta
+      name="description"
+      content="Halaman web terpisah khusus materi dan modul pembelajaran bahasa Arab Tadribul Lughah (Level 1–4 Online Malam 20.00 – 22.00 WIB)."
+    />
+    <meta
+      property="og:title"
+      content="Materi & Modul Pembelajaran (materi.html) — Tadribul Lughah"
+    />
+    <meta
+      property="og:description"
+      content="Halaman terpisah untuk membaca modul, kaidah nahwu/shorof, dan contoh i'rab secara lengkap."
+    />
+    <script>
+      // Proteksi Akses Halaman Terpisah: Wajib login akun pelajar
+      if (!sessionStorage.getItem('tl_student_verified_session_v1')) {
+        window.location.replace('./login.html?role=pelajar');
+      }
+    </script>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600;9..144,700&family=IBM+Plex+Mono:wght@400;600&family=Noto+Naskh+Arabic:wght@500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+  </head>
+  <body>
+    <div id="materi-root"></div>
+    <script type="module" src="/src/materi.tsx"></script>
+  </body>
+</html>

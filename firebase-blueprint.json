@@ -1,0 +1,189 @@
+{
+  "entities": {
+    "ProgramTrack": {
+      "title": "ProgramTrack",
+      "description": "Curriculum level configuration for Tadribul Lughah (Level 1 to Level 4).",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique level ID (e.g. level-1-nahwu)" },
+        "title": { "type": "string", "description": "Indonesian title of the level" },
+        "arabicTitle": { "type": "string", "description": "Arabic script title of the level" },
+        "subtitle": { "type": "string", "description": "Short subtitle describing the discipline" },
+        "category": {
+          "type": "string",
+          "enum": ["Ilmu Nahwu", "Ilmu Shorof"],
+          "description": "Core linguistic branch"
+        },
+        "levelBadge": { "type": "string", "description": "Level badge label (e.g. Level 1 — Nahwu Dasar)" },
+        "durationWeeks": { "type": "number", "description": "Duration in weeks" },
+        "sessionsPerWeek": { "type": "number", "description": "Sessions per week" },
+        "sessionMinutes": { "type": "number", "description": "Duration per session in minutes" },
+        "scheduleDays": { "type": "string", "description": "Fixed days for the level (e.g. Kamis & Jumat)" },
+        "scheduleTime": { "type": "string", "description": "Fixed evening hours (e.g. 20.00 – 22.00 WIB)" },
+        "tuitionIDR": { "type": "number", "description": "Tuition fee in IDR (e.g. 85000)" },
+        "summary": { "type": "string", "description": "Overview description of the level" },
+        "targetOutcome": { "type": "string", "description": "Measurable competency outcome" },
+        "kitabReference": { "type": "string", "description": "Primary textbook or reference module" },
+        "imageKey": {
+          "type": "string",
+          "enum": ["turats", "hiwar"],
+          "description": "Visual theme key"
+        },
+        "featured": { "type": "boolean", "description": "Whether highlighted as a primary entry level" },
+        "registrationOpen": { "type": "boolean", "description": "Whether registration is currently open (ON) or closed (OFF) for this level" },
+        "angkatan": { "type": "string", "description": "Batch or cohort label/number for this level (e.g. Angkatan 1)" },
+        "order": { "type": "number", "description": "Display sorting order (1-4)" },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Last modified timestamp" }
+      },
+      "required": [
+        "id",
+        "title",
+        "arabicTitle",
+        "subtitle",
+        "category",
+        "levelBadge",
+        "durationWeeks",
+        "sessionsPerWeek",
+        "sessionMinutes",
+        "scheduleDays",
+        "scheduleTime",
+        "tuitionIDR",
+        "summary",
+        "targetOutcome",
+        "kitabReference",
+        "imageKey",
+        "order"
+      ]
+    },
+    "ClassSchedule": {
+      "title": "ClassSchedule",
+      "description": "Active class schedule batch for Tadribul Lughah.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique schedule ID" },
+        "programId": { "type": "string", "description": "Associated ProgramTrack ID" },
+        "programName": { "type": "string", "description": "Display name of the level" },
+        "batchCode": { "type": "string", "description": "Batch code identifier" },
+        "mode": {
+          "type": "string",
+          "enum": ["Online Live Interaktif (Zoom)"],
+          "description": "Delivery mode"
+        },
+        "days": { "type": "string", "description": "Class days" },
+        "timeWIB": { "type": "string", "description": "Class hours in WIB" },
+        "startDate": { "type": "string", "description": "Display start date" },
+        "instructor": { "type": "string", "description": "Assigned Ustadz/mudarris" },
+        "capacity": { "type": "number", "description": "Total seat capacity" },
+        "enrolled": { "type": "number", "description": "Current enrolled students count" },
+        "feeIDR": { "type": "number", "description": "Fee in IDR" },
+        "order": { "type": "number", "description": "Display sorting order" },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Last modified timestamp" }
+      },
+      "required": [
+        "id",
+        "programId",
+        "programName",
+        "batchCode",
+        "mode",
+        "days",
+        "timeWIB",
+        "startDate",
+        "instructor",
+        "capacity",
+        "enrolled",
+        "feeIDR",
+        "order"
+      ]
+    },
+    "RegistrationRecord": {
+      "title": "RegistrationRecord",
+      "description": "Private student registration record containing contact PII (restricted to Superadmin read/edit).",
+      "type": "object",
+      "properties": {
+        "registrationNumber": { "type": "string", "description": "Unique registration ID (e.g. TL-2025-8492)" },
+        "fullName": { "type": "string", "description": "Student full name" },
+        "gender": { "type": "string", "description": "Student gender (Laki-laki or Perempuan)" },
+        "email": { "type": "string", "description": "Student email address (PII)" },
+        "whatsapp": { "type": "string", "description": "Student WhatsApp number (PII)" },
+        "city": { "type": "string", "description": "Student city or domicile" },
+        "occupation": { "type": "string", "description": "Student background or occupation" },
+        "selectedProgramId": { "type": "string", "description": "Chosen ProgramTrack ID" },
+        "selectedProgramName": { "type": "string", "description": "Chosen ProgramTrack display name" },
+        "selectedScheduleId": { "type": "string", "description": "Chosen ClassSchedule ID" },
+        "selectedScheduleSummary": { "type": "string", "description": "Summary of days & hours" },
+        "learningGoal": { "type": "string", "description": "Student motivation and target" },
+        "totalTuitionIDR": { "type": "number", "description": "Total invoice amount in IDR" },
+        "registeredAt": { "type": "string", "description": "Formatted registration date" },
+        "status": { "type": "string", "description": "Verification status" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Creation timestamp" }
+      },
+      "required": [
+        "registrationNumber",
+        "fullName",
+        "email",
+        "whatsapp",
+        "city",
+        "occupation",
+        "selectedProgramId",
+        "selectedProgramName",
+        "selectedScheduleId",
+        "selectedScheduleSummary",
+        "learningGoal",
+        "totalTuitionIDR",
+        "registeredAt",
+        "status"
+      ]
+    },
+    "RegistrationPublicStatus": {
+      "title": "RegistrationPublicStatus",
+      "description": "Sanitized non-PII student status card for public registration verification.",
+      "type": "object",
+      "properties": {
+        "registrationNumber": { "type": "string", "description": "Unique registration ID (e.g. TL-2025-8492)" },
+        "fullName": { "type": "string", "description": "Student full name" },
+        "gender": { "type": "string", "description": "Student gender (Laki-laki or Perempuan)" },
+        "city": { "type": "string", "description": "Student city or domicile" },
+        "occupation": { "type": "string", "description": "Student background or occupation" },
+        "selectedProgramId": { "type": "string", "description": "Chosen ProgramTrack ID" },
+        "selectedProgramName": { "type": "string", "description": "Chosen ProgramTrack display name" },
+        "selectedScheduleId": { "type": "string", "description": "Chosen ClassSchedule ID" },
+        "selectedScheduleSummary": { "type": "string", "description": "Summary of days & hours" },
+        "totalTuitionIDR": { "type": "number", "description": "Total invoice amount in IDR" },
+        "registeredAt": { "type": "string", "description": "Formatted registration date" },
+        "status": { "type": "string", "description": "Verification status" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Creation timestamp" }
+      },
+      "required": [
+        "registrationNumber",
+        "fullName",
+        "city",
+        "occupation",
+        "selectedProgramId",
+        "selectedProgramName",
+        "selectedScheduleId",
+        "selectedScheduleSummary",
+        "totalTuitionIDR",
+        "registeredAt",
+        "status"
+      ]
+    }
+  },
+  "firestore": {
+    "/programs/{programId}": {
+      "schema": { "$ref": "#/entities/ProgramTrack" },
+      "description": "Publicly readable Tadribul Lughah curriculum levels; writable only by Superadmin."
+    },
+    "/schedules/{scheduleId}": {
+      "schema": { "$ref": "#/entities/ClassSchedule" },
+      "description": "Publicly readable class schedules; writable only by Superadmin."
+    },
+    "/registrations/{registrationId}": {
+      "schema": { "$ref": "#/entities/RegistrationRecord" },
+      "description": "Private student registrations with PII; public create with strict schema validation, read/update/delete restricted to Superadmin."
+    },
+    "/registrationStatuses/{registrationId}": {
+      "schema": { "$ref": "#/entities/RegistrationPublicStatus" },
+      "description": "Sanitized non-PII student status cards for public status lookup; public create/read, update/delete restricted to Superadmin."
+    }
+  }
+}
