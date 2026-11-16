@@ -1,19 +1,29 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   PROGRAM_TRACKS,
   CLASS_SCHEDULES,
   ProgramTrack,
   ClassSchedule,
   RegistrationRecord,
-  formatIDR
+  formatIDR,
+  formatWhatsAppNumber,
+  isScheduleRegistrationOpen,
+  isProgramHasAnyOpenSchedule,
+  getPreferredScheduleForProgram,
+  getRegistrationAngkatanLabel,
+  findExistingBatchEnrollment,
+  getNextAvailableOpenScheduleForProgram
 } from '../data/arabicAcademyData';
+import { ScheduleClassSelector } from './ScheduleClassSelector';
+import {
+  EnrollmentConfirmModal,
+  PendingEnrollmentConfirmation
+} from './EnrollmentConfirmModal';
 import {
   CheckCircle2,
   Download,
-  Search,
   Printer,
   UserPlus,
-  FileText,
   AlertCircle,
   ArrowRight,
   GraduationCap,
@@ -23,7 +33,10 @@ import {
   UserCheck,
   ShieldCheck,
   Sparkles,
-  BookOpen
+  BookOpen,
+  Calendar,
+  RotateCcw,
+  Loader2
 } from 'lucide-react';
 import {
   StudentAccount,
@@ -33,7 +46,9 @@ import {
   registerNewStudentAccount,
   loginStudentAccount,
   enrollStudentInProgram,
-  getStudentRegistrations
+  getStudentRegistrations,
+  syncStudentAccountsFromServer,
+  syncRegistrationsFromServer
 } from '../utils/studentAccountStore';
 
 interface RegistrationWorkspaceProps {
@@ -45,9 +60,9 @@ interface RegistrationWorkspaceProps {
   onSelectProgram: (programId: string) => void;
   onSelectSchedule: (scheduleId: string) => void;
   onSubmitRegistration: (newRecord: RegistrationRecord) => void;
-  mode: 'form' | 'lookup';
+  mode?: 'form';
   onNavigatePage: (
-    page: 'beranda' | 'kurikulum' | 'jadwal' | 'pendaftaran' | 'cek-status'
+    page: 'beranda' | 'kurikulum' | 'jadwal' | 'pendaftaran'
   ) => void;
 }
 
@@ -96,30 +111,40 @@ export const RegistrationWorkspace: React.FC<RegistrationWorkspaceProps> = ({
   // Program Enrollment Section State
   const [targetedProgramId, setTargetedProgramId] = useState<string>(selectedProgramId || 'tl-level-1');
   const [targetedScheduleId, setTargetedScheduleId] = useState<string>(selectedScheduleId || 'sch-lv1-malam');
+  const hasManuallySelectedScheduleRef = useRef<boolean>(false);
   const [learningGoal, setLearningGoal] = useState('');
 
   // Messages & Submitted Confirmation
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successBanner, setSuccessBanner] = useState<string | null>(null);
   const [submittedRecord, setSubmittedRecord] = useState<RegistrationRecord | null>(null);
-
-  // Lookup State
-  const [searchQuery, setSearchQuery] = useState('');
+  const [isSubmittingAccount, setIsSubmittingAccount] = useState<boolean>(false);
+  const [pendingConfirmEnrollment, setPendingConfirmEnrollment] =
+    useState<PendingEnrollmentConfirmation | null>(null);
+  const [invalidField, setInvalidField] = useState<'fullName' | 'email' | 'whatsapp' | 'city' | 'password' | null>(null);
 
   // Listen for session changes or reload active account
   useEffect(() => {
-    const session = getActiveStudentSession();
-    if (session) {
-      const accounts = getStudentAccounts();
-      const matched = accounts.find(
-        (a) =>
-          a.registrationNumber.toUpperCase() === session.registrationNumber.toUpperCase() ||
-          a.email.toLowerCase() === session.email.toLowerCase()
-      );
-      if (matched) {
-        setActiveAccount(matched);
-      }
-    }
+    syncStudentAccountsFromServer()
+      .then((accounts) => {
+        const session = getActiveStudentSession();
+        if (session) {
+          const matched = accounts.find(
+            (a) =>
+              a.registrationNumber.toUpperCase() ===
+                session.registrationNumber.toUpperCase() ||
+              a.email.toLowerCase() === session.email.toLowerCase()
+          );
+          if (matched) {
+            setActiveAccount(matched);
+          } else {
+            setActiveAccount(null);
+            clearActiveStudentSession();
+          }
+        }
+      })
+      .catch(() => {});
+    syncRegistrationsFromServer().catch(() => {});
   }, []);
 
   // Compute active target program & schedule
@@ -132,19 +157,43 @@ export const RegistrationWorkspace: React.FC<RegistrationWorkspaceProps> = ({
     (s) => s.programId === activeProgram.id
   );
 
+  const preferredScheduleForActiveProgram = getPreferredScheduleForProgram(
+    activeProgram,
+    schedules
+  );
+
+  const currentTargetedSchedule = availableSchedulesForProgram.find(
+    (s) => s.id === targetedScheduleId
+  );
+
   const activeSchedule =
-    schedules.find((s) => s.id === targetedScheduleId) ||
+    (currentTargetedSchedule && isScheduleRegistrationOpen(currentTargetedSchedule, activeProgram)
+      ? currentTargetedSchedule
+      : null) ||
+    preferredScheduleForActiveProgram ||
     availableSchedulesForProgram[0] ||
     schedules[0] ||
     CLASS_SCHEDULES[0];
 
   useEffect(() => {
-    const belongs = availableSchedulesForProgram.some((s) => s.id === targetedScheduleId);
-    if (!belongs && availableSchedulesForProgram.length > 0) {
-      setTargetedScheduleId(availableSchedulesForProgram[0].id);
-      onSelectSchedule(availableSchedulesForProgram[0].id);
+    const currentSch = availableSchedulesForProgram.find((s) => s.id === targetedScheduleId);
+    const hasOpenSchedule = availableSchedulesForProgram.some((s) =>
+      isScheduleRegistrationOpen(s, activeProgram)
+    );
+    const currentIsOpen = currentSch ? isScheduleRegistrationOpen(currentSch, activeProgram) : false;
+
+    const shouldResetToPreferred =
+      !currentSch ||
+      (hasOpenSchedule && !currentIsOpen) ||
+      !hasManuallySelectedScheduleRef.current;
+
+    if (shouldResetToPreferred && preferredScheduleForActiveProgram?.id) {
+      if (preferredScheduleForActiveProgram.id !== targetedScheduleId) {
+        setTargetedScheduleId(preferredScheduleForActiveProgram.id);
+        onSelectSchedule(preferredScheduleForActiveProgram.id);
+      }
     }
-  }, [targetedProgramId, schedules]);
+  }, [targetedProgramId, programs, schedules]);
 
   // Registrations associated with the active student account
   const accountRegistrations = activeAccount
@@ -160,35 +209,139 @@ export const RegistrationWorkspace: React.FC<RegistrationWorkspaceProps> = ({
   });
 
   // Handle Account Registration (Step 1)
-  const handleRegisterAccount = (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleRegisterAccount = (e?: React.FormEvent | React.MouseEvent) => {
+    if (e && typeof e.preventDefault === 'function') {
+      e.preventDefault();
+    }
     setErrorMessage(null);
 
-    const res = registerNewStudentAccount({
-      fullName: newFullName,
-      gender: newGender,
-      email: newEmail,
-      whatsapp: newWhatsapp,
-      city: newCity,
-      occupation: newOccupation,
-      password: newPassword
-    });
-
-    if (!res.ok) {
-      setErrorMessage(res.reason);
+    // 1. Validasi field nama lengkap
+    if (!newFullName.trim()) {
+      setInvalidField('fullName');
+      setErrorMessage('Nama Lengkap wajib diisi sesuai KTP / Identitas.');
+      const el = document.getElementById('acc-fullname');
+      el?.focus();
+      el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      return;
+    }
+    if (newFullName.trim().length < 3) {
+      setInvalidField('fullName');
+      setErrorMessage('Nama Lengkap minimal 3 karakter sesuai identitas.');
+      const el = document.getElementById('acc-fullname');
+      el?.focus();
+      el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
       return;
     }
 
-    setActiveAccount(res.account);
-    setSuccessBanner(
-      `Akun Pelajar Anda atas nama "${res.account.fullName}" (${res.account.email}) berhasil dibuat! Silakan lanjutkan memilih program level di bawah ini.`
-    );
+    // 2. Validasi field email
+    if (!newEmail.trim()) {
+      setInvalidField('email');
+      setErrorMessage('Alamat Email aktif wajib diisi sebagai identitas login.');
+      const el = document.getElementById('acc-email');
+      el?.focus();
+      el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      return;
+    }
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(newEmail.trim())) {
+      setInvalidField('email');
+      setErrorMessage('Format email tidak valid (contoh: nama@domain.com).');
+      const el = document.getElementById('acc-email');
+      el?.focus();
+      el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      return;
+    }
+
+    // 3. Validasi field WhatsApp
+    if (!newWhatsapp.trim()) {
+      setInvalidField('whatsapp');
+      setErrorMessage('Nomor WhatsApp aktif wajib diisi untuk koordinasi kelas.');
+      const el = document.getElementById('acc-whatsapp');
+      el?.focus();
+      el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      return;
+    }
+    const phoneDigits = newWhatsapp.replace(/\D/g, '');
+    if (phoneDigits.length < 9) {
+      setInvalidField('whatsapp');
+      setErrorMessage('Nomor WhatsApp minimal 9 digit angka.');
+      const el = document.getElementById('acc-whatsapp');
+      el?.focus();
+      el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      return;
+    }
+
+    // 4. Validasi field Kota
+    if (!newCity.trim() || newCity.trim().length < 2) {
+      setInvalidField('city');
+      setErrorMessage('Kota / Kabupaten Domisili wajib diisi.');
+      const el = document.getElementById('acc-city');
+      el?.focus();
+      el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      return;
+    }
+
+    // 5. Validasi kata sandi
+    if (!newPassword.trim() || newPassword.trim().length < 6) {
+      setInvalidField('password');
+      setErrorMessage('Kata sandi akun minimal 6 karakter.');
+      const el = document.getElementById('acc-password');
+      el?.focus();
+      el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      return;
+    }
+
+    setInvalidField(null);
+    setIsSubmittingAccount(true);
+    try {
+      const res = registerNewStudentAccount({
+        fullName: newFullName,
+        gender: newGender,
+        email: newEmail,
+        whatsapp: formatWhatsAppNumber(newWhatsapp) || newWhatsapp,
+        city: newCity,
+        occupation: newOccupation,
+        password: newPassword
+      });
+
+      if (!res.ok) {
+        setErrorMessage(res.reason);
+        if (res.reason.includes('sudah memiliki akun')) {
+          setInvalidField('email');
+        }
+        setTimeout(() => {
+          const errEl = document.getElementById('account-creation-error-bottom') || document.getElementById('acc-email');
+          errEl?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }, 50);
+        return;
+      }
+
+      setActiveAccount(res.account);
+      setSuccessBanner(
+        `Akun Pelajar Anda atas nama "${res.account.fullName}" (${res.account.email}) berhasil dibuat! Silakan lanjutkan memilih program level di bawah ini.`
+      );
+
+      // Smooth scroll to Step 2
+      setTimeout(() => {
+        const step2 = document.getElementById('step-2-program-selection');
+        if (step2) {
+          step2.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+      }, 100);
+    } finally {
+      setIsSubmittingAccount(false);
+    }
   };
 
   // Handle Account Login (Step 1)
-  const handleLoginAccount = (e: React.FormEvent) => {
+  const handleLoginAccount = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMessage(null);
+
+    try {
+      await syncStudentAccountsFromServer();
+      await syncRegistrationsFromServer();
+    } catch {}
 
     const res = loginStudentAccount(loginIdentifier, loginPassword);
     if (!res.ok) {
@@ -220,26 +373,71 @@ export const RegistrationWorkspace: React.FC<RegistrationWorkspaceProps> = ({
       return;
     }
 
-    if (programToEnroll.registrationOpen === false) {
-      setErrorMessage(
-        `Mohon maaf, pendaftaran untuk Level ${programToEnroll.levelNumber} (${programToEnroll.title}) saat ini sedang ditutup (OFF) oleh Superadmin.`
-      );
-      return;
-    }
-
-    if (enrolledProgramIds.has(programToEnroll.id)) {
-      setErrorMessage(
-        `Akun Anda sudah terdaftar pada ${programToEnroll.title}. Anda tidak perlu mendaftar ulang pada level ini.`
-      );
-      return;
-    }
-
     const progSchedules = schedules.filter((s) => s.programId === programToEnroll.id);
+    const preferredSchedule = getPreferredScheduleForProgram(programToEnroll, schedules);
+    const targetedSch = progSchedules.find((s) => s.id === targetedScheduleId);
     const chosenSchedule =
-      progSchedules.find((s) => s.id === targetedScheduleId) ||
-      progSchedules[0] ||
-      schedules[0] ||
-      CLASS_SCHEDULES[0];
+      (targetedSch && isScheduleRegistrationOpen(targetedSch, programToEnroll) ? targetedSch : null) ||
+      preferredSchedule;
+    const targetAngkatan = chosenSchedule.angkatan?.trim() || programToEnroll.angkatan || 'Angkatan 1';
+
+    if (!isScheduleRegistrationOpen(chosenSchedule, programToEnroll)) {
+      setErrorMessage(
+        `Mohon maaf, pendaftaran untuk Level ${programToEnroll.levelNumber} · ${targetAngkatan} (${chosenSchedule.batchCode}) saat ini sedang ditutup (OFF) oleh Superadmin.`
+      );
+      return;
+    }
+
+    const latestAccountRegs = getStudentRegistrations(activeAccount.email, registrations);
+    const duplicateBatch = findExistingBatchEnrollment(
+      latestAccountRegs,
+      programToEnroll.id,
+      targetAngkatan,
+      schedules,
+      programs
+    );
+    if (duplicateBatch) {
+      setErrorMessage(
+        `Anda sudah terdaftar pada ${programToEnroll.title} · ${targetAngkatan} (No. Reg: ${duplicateBatch.registrationNumber}). Setiap peserta hanya dapat mendaftar 1 kali pada level dan angkatan yang sama.`
+      );
+      return;
+    }
+
+    const isReEnrollment = enrolledProgramIds.has(programToEnroll.id);
+    setPendingConfirmEnrollment({
+      program: programToEnroll,
+      schedule: chosenSchedule,
+      angkatan: targetAngkatan,
+      learningGoal,
+      isReEnrollment
+    });
+  };
+
+  const executeConfirmedEnrollment = () => {
+    if (!activeAccount || !pendingConfirmEnrollment) return;
+    const {
+      program: programToEnroll,
+      schedule: chosenSchedule,
+      angkatan: targetAngkatan,
+      learningGoal: goalText,
+      isReEnrollment
+    } = pendingConfirmEnrollment;
+
+    const latestAccountRegs = getStudentRegistrations(activeAccount.email, registrations);
+    const duplicateBatch = findExistingBatchEnrollment(
+      latestAccountRegs,
+      programToEnroll.id,
+      targetAngkatan,
+      schedules,
+      programs
+    );
+    if (duplicateBatch) {
+      setPendingConfirmEnrollment(null);
+      setErrorMessage(
+        `Anda sudah terdaftar pada ${programToEnroll.title} · ${targetAngkatan} (No. Reg: ${duplicateBatch.registrationNumber}). Setiap peserta hanya dapat mendaftar 1 kali pada level dan angkatan yang sama.`
+      );
+      return;
+    }
 
     const randomDigits = Math.floor(1000 + Math.random() * 9000);
     const newRegNo = `TL-2026-${randomDigits}`;
@@ -256,19 +454,23 @@ export const RegistrationWorkspace: React.FC<RegistrationWorkspaceProps> = ({
       fullName: activeAccount.fullName,
       gender: activeAccount.gender || 'Laki-laki',
       email: activeAccount.email,
-      whatsapp: activeAccount.whatsapp,
+      whatsapp: formatWhatsAppNumber(activeAccount.whatsapp) || activeAccount.whatsapp,
       occupation: activeAccount.occupation || 'Pelajar Terdaftar',
       city: activeAccount.city || 'Indonesia',
       selectedProgramId: programToEnroll.id,
-      selectedProgramName: programToEnroll.title,
+      selectedProgramName: `${programToEnroll.title} (${targetAngkatan})`,
       selectedScheduleId: chosenSchedule.id,
-      selectedScheduleSummary: `${chosenSchedule.batchCode} · ${chosenSchedule.days} (${chosenSchedule.timeWIB}) · Online`,
+      selectedScheduleSummary: `${chosenSchedule.batchCode} · ${chosenSchedule.days} (${chosenSchedule.timeWIB}) · ${targetAngkatan} · Online`,
       learningGoal:
-        learningGoal.trim() ||
-        `Menguasai kaidah ${programToEnroll.category === 'shorof' ? 'Shorof' : 'Nahwu'} secara sistematis melalui Tadribul Lughah Level ${programToEnroll.levelNumber}.`,
+        (goalText || '').trim() ||
+        (isReEnrollment
+          ? `Mengulang & memantapkan kaidah di ${targetAngkatan}.`
+          : `Menguasai kaidah ${programToEnroll.category === 'shorof' ? 'Shorof' : 'Nahwu'} secara sistematis melalui Tadribul Lughah Level ${programToEnroll.levelNumber} (${targetAngkatan}).`),
       totalTuitionIDR: programToEnroll.tuitionIDR,
-      registeredAt: nowStr,
-      status: 'Terverifikasi — Menunggu Orientasi'
+      paidTuitionIDR: 0,
+      installmentPaidCount: 0,
+      paymentPlan: 'cicilan',
+      registeredAt: nowStr
     };
 
     // Attach program registration to existing student account
@@ -282,31 +484,42 @@ export const RegistrationWorkspace: React.FC<RegistrationWorkspaceProps> = ({
     }
 
     onSubmitRegistration(newRecord);
+    setPendingConfirmEnrollment(null);
     setSubmittedRecord(newRecord);
     setSuccessBanner(
-      `Pendaftaran untuk ${programToEnroll.title} berhasil! Nomor Registrasi baru Anda: ${newRegNo}.`
+      isReEnrollment
+        ? `Alhamdulillah! Pendaftaran ulang untuk ${programToEnroll.title} (${targetAngkatan}) berhasil! Nomor Registrasi baru: ${newRegNo}. Seluruh data, nilai, dan riwayat angkatan sebelumnya tetap aman tersimpan di akun Anda.`
+        : `Pendaftaran untuk ${programToEnroll.title} berhasil! Nomor Registrasi baru Anda: ${newRegNo}.`
     );
   };
 
   const handleDownloadReceipt = (rec: RegistrationRecord) => {
+    const isLunas = (rec.installmentPaidCount || 0) >= 6 || ((rec.paidTuitionIDR || 0) >= rec.totalTuitionIDR && rec.totalTuitionIDR > 0);
+    const payStatusText = isLunas
+      ? 'Lunas Penuh (6/6)'
+      : (rec.installmentPaidCount || 0) > 0
+        ? `Cicilan ${rec.installmentPaidCount}/6 Lunas`
+        : 'Belum Lunas (Bulan 1)';
+
     const content = [
       '==============================================================',
       '        TADRIBUL LUGHAH — BUKTI PENDAFTARAN RESMI             ',
       '==============================================================',
       `Nomor Registrasi   : ${rec.registrationNumber}`,
       `Tanggal Daftar     : ${rec.registeredAt}`,
-      `Status Pendaftaran : ${rec.status}`,
+      `Status Pembayaran  : ${payStatusText}`,
       '--------------------------------------------------------------',
       'DATA AKUN PESERTA DIDIK:',
       `Nama Lengkap       : ${rec.fullName}`,
       `Jenis Kelamin      : ${rec.gender || 'Laki-laki'}`,
       `Email Akun         : ${rec.email}`,
-      `Nomor WhatsApp     : ${rec.whatsapp}`,
+      `Nomor WhatsApp     : ${formatWhatsAppNumber(rec.whatsapp) || rec.whatsapp}`,
       `Profesi / Aktivitas: ${rec.occupation}`,
       `Kota Domisili      : ${rec.city}`,
       '--------------------------------------------------------------',
       'RINCIAN LEVEL & JADWAL KELAS ONLINE:',
       `Level Pilihan      : ${rec.selectedProgramName}`,
+      `Angkatan Program   : ${rec.selectedProgramName.match(/(Angkatan\s*\d+)/i)?.[1] || 'Angkatan 1'}`,
       `Kode & Jadwal Kelas: ${rec.selectedScheduleSummary}`,
       `Target Belajar     : ${rec.learningGoal}`,
       '--------------------------------------------------------------',
@@ -328,75 +541,47 @@ export const RegistrationWorkspace: React.FC<RegistrationWorkspaceProps> = ({
     URL.revokeObjectURL(url);
   };
 
-  const filteredRegistrations = registrations.filter((r) => {
-    if (!searchQuery.trim()) return true;
-    const q = searchQuery.toLowerCase();
-    return (
-      r.registrationNumber.toLowerCase().includes(q) ||
-      r.fullName.toLowerCase().includes(q) ||
-      r.email.toLowerCase().includes(q) ||
-      r.selectedProgramName.toLowerCase().includes(q)
-    );
-  });
-
   const sampleAccounts = getStudentAccounts().slice(0, 3);
 
   return (
     <section className="py-12 sm:py-16 bg-[#F8FAFC]">
       <div className="max-w-[1200px] mx-auto px-6">
-        {/* Page Header */}
-        <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-6 pb-8 border-b border-slate-200">
-          <div>
-            <p className="text-xs font-semibold text-emerald-800 tracking-wide mb-2 uppercase font-mono">
-              {mode === 'form'
-                ? 'Sistem Admisi Pelajar · 1 Akun untuk 4 Program Level'
-                : 'Direktori & Verifikasi Peserta · Tadribul Lughah'}
-            </p>
-            <h1 className="text-2xl sm:text-3xl lg:text-4xl font-semibold text-slate-900 tracking-tight font-display">
-              {mode === 'form'
-                ? 'Pendaftaran Online Tadribul Lughah (Level 1–4)'
-                : 'Cek Status Pendaftaran & Nomor Registrasi Peserta'}
-            </h1>
-            <p className="mt-2 text-sm sm:text-base text-slate-600 max-w-2xl leading-relaxed">
-              {mode === 'form' ? (
-                <>
-                  Pendaftar wajib memiliki <strong>Akun Pelajar</strong> terlebih dahulu. Dengan <strong>1 akun</strong>, Anda dapat mendaftar hingga <strong>4 program level</strong> tanpa perlu membuat akun lagi. Biaya per level <strong>Rp 510.000</strong> (cicilan 6x <strong>Rp 85.000/bln</strong>). Seluruh kelas online malam (20.00 – 22.00 WIB).
-                </>
-              ) : (
-                <>
-                  Verifikasi status pendaftaran kelas malam online dengan memasukkan Nomor Registrasi (misal: <span className="font-mono">TL-2026-8419</span>) atau nama peserta.
-                </>
-              )}
-            </p>
-          </div>
+        {/* Page Header (hanya tampil sebelum peserta memiliki/login akun dan sebelum selesai memilih level) */}
+        {!submittedRecord && !activeAccount && (
+          <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-6 pb-8 border-b border-slate-200">
+            <div>
+              <p className="text-xs font-semibold text-emerald-800 tracking-wide mb-2 uppercase font-mono">
+                Sistem Admisi Pelajar · 1 Akun untuk 4 Program Level
+              </p>
+              <h1 className="text-2xl sm:text-3xl lg:text-4xl font-semibold text-slate-900 tracking-tight font-display">
+                Pendaftaran Online Tadribul Lughah (Level 1–4)
+              </h1>
+              <p className="mt-2 text-sm sm:text-base text-slate-600 max-w-2xl leading-relaxed">
+                Pendaftar wajib memiliki <strong>Akun Pelajar</strong> terlebih dahulu. Dengan <strong>1 akun</strong>, Anda dapat mendaftar hingga <strong>4 program level</strong> tanpa perlu membuat akun lagi. Biaya per level <strong>{formatIDR(programs[0]?.tuitionIDR || 510000)}</strong> (cicilan 6x <strong>{formatIDR(Math.round((programs[0]?.tuitionIDR || 510000) / 6))}/bln</strong>). Seluruh kelas online malam (20.00 – 22.00 WIB).
+              </p>
+            </div>
 
-          <div className="flex flex-wrap items-center gap-2 self-start lg:self-auto">
-            {mode === 'form' ? (
-              <button
-                type="button"
-                onClick={() => onNavigatePage('cek-status')}
-                className="inline-flex items-center gap-2 px-4 py-2.5 text-xs font-semibold text-slate-800 bg-white border border-slate-200 rounded-lg hover:bg-slate-100 transition-colors whitespace-nowrap shrink-0"
+            <div className="flex flex-wrap items-center gap-2.5 self-start lg:self-auto">
+              <a
+                href="./pelajar.html"
+                className="inline-flex items-center gap-2 px-4 py-2.5 text-xs font-semibold text-white bg-emerald-900 hover:bg-emerald-800 rounded-lg transition-colors whitespace-nowrap shrink-0 shadow-xs"
               >
-                Cek Status Pendaftar ({registrations.length})
+                <span>Portal Pelajar (pelajar.html)</span>
                 <ArrowRight className="w-3.5 h-3.5" />
-              </button>
-            ) : (
-              <button
-                type="button"
-                onClick={() => onNavigatePage('pendaftaran')}
-                className="inline-flex items-center gap-2 px-4 py-2.5 text-xs font-semibold text-white bg-emerald-900 rounded-lg hover:bg-emerald-800 transition-colors whitespace-nowrap shrink-0"
+              </a>
+              <a
+                href="./login.html"
+                className="inline-flex items-center gap-2 px-4 py-2.5 text-xs font-semibold text-slate-700 bg-white border border-slate-300 hover:bg-slate-100 rounded-lg transition-colors whitespace-nowrap shrink-0"
               >
-                <UserPlus className="w-3.5 h-3.5" />
-                Pendaftaran Program Baru
-              </button>
-            )}
+                <span>Login Akun</span>
+              </a>
+            </div>
           </div>
-        </div>
+        )}
 
-        {mode === 'form' ? (
-          submittedRecord ? (
+        {submittedRecord ? (
             /* Confirmation & Digital Student ID Card View */
-            <div className="mt-10 bg-white border border-slate-200 rounded-xl p-6 sm:p-10 space-y-8">
+            <div className="bg-white border border-slate-200 rounded-xl p-6 sm:p-10 space-y-8">
               <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-8 border-b border-slate-200">
                 <div>
                   <div className="inline-flex items-center gap-2 text-xs font-semibold text-emerald-800 mb-2">
@@ -493,12 +678,20 @@ export const RegistrationWorkspace: React.FC<RegistrationWorkspaceProps> = ({
                         {submittedRecord.registrationNumber}
                       </p>
                     </div>
-                    <div className="sm:col-span-2">
+                    <div>
                       <p className="text-xs text-slate-400">
                         Level Program Pilihan
                       </p>
                       <p className="text-sm font-medium mt-0.5">
                         {submittedRecord.selectedProgramName}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-slate-400">
+                        Angkatan Pembelajaran
+                      </p>
+                      <p className="text-sm font-semibold text-emerald-300 mt-0.5">
+                        {submittedRecord.selectedProgramName.match(/(Angkatan\s*\d+)/i)?.[1] || 'Angkatan 1'}
                       </p>
                     </div>
                     <div className="sm:col-span-2">
@@ -513,8 +706,14 @@ export const RegistrationWorkspace: React.FC<RegistrationWorkspaceProps> = ({
 
                   <div className="pt-5 border-t border-slate-800 flex flex-wrap items-center justify-between gap-4 text-xs text-slate-400">
                     <span>Terdaftar: {submittedRecord.registeredAt}</span>
-                    <span className="text-emerald-300 font-medium">
-                      Status: {submittedRecord.status}
+                    <span className="text-amber-300 font-medium">
+                      Status Bayar: {
+                        (submittedRecord.installmentPaidCount || 0) >= 6
+                          ? '✓ Lunas Penuh (6/6)'
+                          : (submittedRecord.installmentPaidCount || 0) > 0
+                            ? `Cicilan ${submittedRecord.installmentPaidCount}/6 Lunas`
+                            : 'Belum Lunas (Bulan 1)'
+                      }
                     </span>
                   </div>
                 </div>
@@ -528,6 +727,12 @@ export const RegistrationWorkspace: React.FC<RegistrationWorkspaceProps> = ({
                       <span>Moda Pembelajaran</span>
                       <span className="font-medium text-slate-900">
                         100% Online Live (Zoom)
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between text-slate-600">
+                      <span>Angkatan Masuk</span>
+                      <span className="font-semibold text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+                        {submittedRecord.selectedProgramName.match(/(Angkatan\s*\d+)/i)?.[1] || 'Angkatan 1'}
                       </span>
                     </div>
                     <div className="flex items-center justify-between text-slate-600">
@@ -557,7 +762,7 @@ export const RegistrationWorkspace: React.FC<RegistrationWorkspaceProps> = ({
             </div>
           ) : (
             /* Registration Flow: Step 1 (Account Gate) -> Step 2 (4 Programs) */
-            <div className="mt-10 space-y-8">
+            <div className={activeAccount ? 'space-y-8' : 'mt-10 space-y-8'}>
               {/* Step Navigation Progress Indicator */}
               <div className="bg-white border border-slate-200 rounded-xl p-4 sm:p-5 flex flex-col sm:flex-row items-center justify-between gap-4">
                 <div className="flex items-center gap-3 w-full sm:w-auto">
@@ -720,10 +925,24 @@ export const RegistrationWorkspace: React.FC<RegistrationWorkspaceProps> = ({
                               type="text"
                               required
                               value={newFullName}
-                              onChange={(e) => setNewFullName(e.target.value)}
+                              onChange={(e) => {
+                                setNewFullName(e.target.value);
+                                if (invalidField === 'fullName') setInvalidField(null);
+                                if (errorMessage) setErrorMessage(null);
+                              }}
                               placeholder="Contoh: Ahmad Zaki Al-Manshur"
-                              className="w-full px-3.5 py-2.5 text-sm bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-emerald-800 text-slate-900"
+                              className={`w-full px-3.5 py-2.5 text-sm bg-white border rounded-lg focus:outline-none transition-colors text-slate-900 ${
+                                invalidField === 'fullName'
+                                  ? 'border-rose-500 ring-2 ring-rose-200'
+                                  : 'border-slate-300 focus:border-emerald-800'
+                              }`}
                             />
+                            {invalidField === 'fullName' && (
+                              <p className="text-xs text-rose-600 mt-1 font-medium flex items-center gap-1">
+                                <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                                <span>Nama Lengkap minimal 3 karakter sesuai identitas</span>
+                              </p>
+                            )}
                           </div>
 
                           <div>
@@ -773,10 +992,24 @@ export const RegistrationWorkspace: React.FC<RegistrationWorkspaceProps> = ({
                               type="email"
                               required
                               value={newEmail}
-                              onChange={(e) => setNewEmail(e.target.value)}
+                              onChange={(e) => {
+                                setNewEmail(e.target.value);
+                                if (invalidField === 'email') setInvalidField(null);
+                                if (errorMessage) setErrorMessage(null);
+                              }}
                               placeholder="nama@email.com"
-                              className="w-full px-3.5 py-2.5 text-sm bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-emerald-800 text-slate-900"
+                              className={`w-full px-3.5 py-2.5 text-sm bg-white border rounded-lg focus:outline-none transition-colors text-slate-900 ${
+                                invalidField === 'email'
+                                  ? 'border-rose-500 ring-2 ring-rose-200'
+                                  : 'border-slate-300 focus:border-emerald-800'
+                              }`}
                             />
+                            {invalidField === 'email' && (
+                              <p className="text-xs text-rose-600 mt-1 font-medium flex items-center gap-1">
+                                <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                                <span>Format email tidak valid (contoh: nama@domain.com)</span>
+                              </p>
+                            )}
                           </div>
 
                           <div>
@@ -791,10 +1024,24 @@ export const RegistrationWorkspace: React.FC<RegistrationWorkspaceProps> = ({
                               type="tel"
                               required
                               value={newWhatsapp}
-                              onChange={(e) => setNewWhatsapp(e.target.value)}
-                              placeholder="0812-xxxx-xxxx"
-                              className="w-full px-3.5 py-2.5 text-sm bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-emerald-800 text-slate-900 font-mono tabular-nums"
+                              onChange={(e) => {
+                                setNewWhatsapp(formatWhatsAppNumber(e.target.value));
+                                if (invalidField === 'whatsapp') setInvalidField(null);
+                                if (errorMessage) setErrorMessage(null);
+                              }}
+                              placeholder="0812-3456-7890"
+                              className={`w-full px-3.5 py-2.5 text-sm bg-white border rounded-lg focus:outline-none transition-colors text-slate-900 font-mono tabular-nums ${
+                                invalidField === 'whatsapp'
+                                  ? 'border-rose-500 ring-2 ring-rose-200'
+                                  : 'border-slate-300 focus:border-emerald-800'
+                              }`}
                             />
+                            {invalidField === 'whatsapp' && (
+                              <p className="text-xs text-rose-600 mt-1 font-medium flex items-center gap-1">
+                                <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                                <span>Nomor WhatsApp minimal 9 digit angka</span>
+                              </p>
+                            )}
                           </div>
 
                           <div>
@@ -809,10 +1056,24 @@ export const RegistrationWorkspace: React.FC<RegistrationWorkspaceProps> = ({
                               type="text"
                               required
                               value={newCity}
-                              onChange={(e) => setNewCity(e.target.value)}
+                              onChange={(e) => {
+                                setNewCity(e.target.value);
+                                if (invalidField === 'city') setInvalidField(null);
+                                if (errorMessage) setErrorMessage(null);
+                              }}
                               placeholder="Contoh: Jakarta / Bandung / Surabaya"
-                              className="w-full px-3.5 py-2.5 text-sm bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-emerald-800 text-slate-900"
+                              className={`w-full px-3.5 py-2.5 text-sm bg-white border rounded-lg focus:outline-none transition-colors text-slate-900 ${
+                                invalidField === 'city'
+                                  ? 'border-rose-500 ring-2 ring-rose-200'
+                                  : 'border-slate-300 focus:border-emerald-800'
+                              }`}
                             />
+                            {invalidField === 'city' && (
+                              <p className="text-xs text-rose-600 mt-1 font-medium flex items-center gap-1">
+                                <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                                <span>Mohon isi Kota / Kabupaten Domisili Anda</span>
+                              </p>
+                            )}
                           </div>
 
                           <div>
@@ -848,18 +1109,62 @@ export const RegistrationWorkspace: React.FC<RegistrationWorkspaceProps> = ({
                               type="password"
                               required
                               value={newPassword}
-                              onChange={(e) => setNewPassword(e.target.value)}
+                              onChange={(e) => {
+                                setNewPassword(e.target.value);
+                                if (invalidField === 'password') setInvalidField(null);
+                                if (errorMessage) setErrorMessage(null);
+                              }}
                               placeholder="Minimal 6 karakter"
-                              className="w-full px-3.5 py-2.5 text-sm bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-emerald-800 text-slate-900"
+                              className={`w-full px-3.5 py-2.5 text-sm bg-white border rounded-lg focus:outline-none transition-colors text-slate-900 ${
+                                invalidField === 'password'
+                                  ? 'border-rose-500 ring-2 ring-rose-200'
+                                  : 'border-slate-300 focus:border-emerald-800'
+                              }`}
                             />
-                            <p className="text-[11px] text-slate-500 mt-1 flex items-center gap-1">
-                              <KeyRound className="w-3 h-3 text-emerald-800 shrink-0" />
-                              <span>
-                                Digunakan untuk masuk ke akun Anda kapan saja dan mengakses portal belajar (<span className="font-mono">pelajar.html</span>).
-                              </span>
-                            </p>
+                            {invalidField === 'password' ? (
+                              <p className="text-xs text-rose-600 mt-1 font-medium flex items-center gap-1">
+                                <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                                <span>Kata sandi akun minimal 6 karakter</span>
+                              </p>
+                            ) : (
+                              <p className="text-[11px] text-slate-500 mt-1 flex items-center gap-1">
+                                <KeyRound className="w-3 h-3 text-emerald-800 shrink-0" />
+                                <span>
+                                  Digunakan untuk masuk ke akun Anda kapan saja dan mengakses portal belajar (<span className="font-mono">pelajar.html</span>).
+                                </span>
+                              </p>
+                            )}
                           </div>
                         </div>
+
+                        {/* Error Notification Right Above Action Button */}
+                        {errorMessage && (
+                          <div
+                            id="account-creation-error-bottom"
+                            role="alert"
+                            className="p-4 bg-rose-50 border-2 border-rose-300 rounded-xl flex items-start gap-3 text-xs sm:text-sm text-rose-950 shadow-xs"
+                          >
+                            <AlertCircle className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
+                            <div className="flex-1 space-y-1">
+                              <p className="font-semibold text-rose-900 leading-snug">{errorMessage}</p>
+                              {errorMessage.includes('sudah memiliki akun') && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setAccountSubMode('login');
+                                    setLoginIdentifier(newEmail);
+                                    setErrorMessage(null);
+                                    setInvalidField(null);
+                                  }}
+                                  className="mt-2 inline-flex items-center gap-1.5 font-bold text-emerald-800 hover:text-emerald-950 underline cursor-pointer bg-white px-3 py-1.5 rounded-lg border border-emerald-300 shadow-2xs"
+                                >
+                                  <LogIn className="w-3.5 h-3.5" />
+                                  <span>Klik di sini untuk langsung Masuk dengan kata sandi Anda →</span>
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        )}
 
                         <div className="pt-4 border-t border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                           <p className="text-xs text-slate-500">
@@ -867,10 +1172,24 @@ export const RegistrationWorkspace: React.FC<RegistrationWorkspaceProps> = ({
                           </p>
                           <button
                             type="submit"
-                            className="inline-flex items-center justify-center gap-2 px-6 py-3 text-xs font-semibold text-white bg-emerald-900 hover:bg-emerald-800 rounded-lg transition-colors whitespace-nowrap shrink-0 shadow-xs"
+                            id="btn-create-account"
+                            disabled={isSubmittingAccount}
+                            onClick={(e) => {
+                              handleRegisterAccount(e);
+                            }}
+                            className="inline-flex items-center justify-center gap-2 px-6 py-3.5 text-xs sm:text-sm font-semibold text-white bg-emerald-900 hover:bg-emerald-800 active:scale-[0.98] disabled:opacity-75 disabled:cursor-not-allowed rounded-lg transition-all whitespace-nowrap shrink-0 shadow-md cursor-pointer"
                           >
-                            <span>Buat Akun & Lanjut ke Pilihan Program (Level 1–4)</span>
-                            <ArrowRight className="w-4 h-4" />
+                            {isSubmittingAccount ? (
+                              <>
+                                <Loader2 className="w-4 h-4 animate-spin" />
+                                <span>Membuat Akun Pelajar...</span>
+                              </>
+                            ) : (
+                              <>
+                                <span>Buat Akun & Lanjut ke Pilihan Program (Level 1–4)</span>
+                                <ArrowRight className="w-4 h-4" />
+                              </>
+                            )}
                           </button>
                         </div>
                       </form>
@@ -916,15 +1235,28 @@ export const RegistrationWorkspace: React.FC<RegistrationWorkspaceProps> = ({
                             type="password"
                             required
                             value={loginPassword}
-                            onChange={(e) => setLoginPassword(e.target.value)}
+                            onChange={(e) => {
+                              setLoginPassword(e.target.value);
+                              if (errorMessage) setErrorMessage(null);
+                            }}
                             placeholder="Masukkan kata sandi akun Anda"
                             className="w-full px-3.5 py-2.5 text-sm bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-emerald-800 text-slate-900"
                           />
                         </div>
 
+                        {errorMessage && (
+                          <div
+                            role="alert"
+                            className="p-3.5 bg-rose-50 border-2 border-rose-300 rounded-xl flex items-start gap-2.5 text-xs text-rose-950 shadow-xs"
+                          >
+                            <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                            <p className="font-semibold text-rose-900 leading-snug">{errorMessage}</p>
+                          </div>
+                        )}
+
                         <button
                           type="submit"
-                          className="w-full inline-flex items-center justify-center gap-2 px-5 py-3 text-xs font-semibold text-white bg-emerald-900 hover:bg-emerald-800 rounded-lg transition-colors"
+                          className="w-full inline-flex items-center justify-center gap-2 px-5 py-3 text-xs font-semibold text-white bg-emerald-900 hover:bg-emerald-800 active:scale-[0.98] rounded-lg transition-all cursor-pointer"
                         >
                           <LogIn className="w-4 h-4" />
                           <span>Masuk & Lanjut ke Pilihan Program (Level 1–4)</span>
@@ -936,20 +1268,28 @@ export const RegistrationWorkspace: React.FC<RegistrationWorkspaceProps> = ({
                             Pilih Cepat Akun Terdaftar (Demo / Uji Coba):
                           </p>
                           <div className="flex flex-wrap gap-1.5">
-                            {sampleAccounts.map((acc) => (
-                              <button
-                                key={acc.registrationNumber}
-                                type="button"
-                                onClick={() => {
-                                  setLoginIdentifier(acc.email);
-                                  setLoginPassword(acc.password);
-                                  setErrorMessage(null);
-                                }}
-                                className="px-2.5 py-1 text-[11px] font-mono bg-slate-100 hover:bg-slate-200 border border-slate-300 rounded text-slate-800 transition-colors"
-                              >
-                                {acc.fullName.split(' ')[0]} ({acc.registrationNumber})
-                              </button>
-                            ))}
+                            {sampleAccounts.map((acc) => {
+                              const isMulti = (acc.enrolledRegistrationNumbers?.length || 0) > 1;
+                              return (
+                                <button
+                                  key={acc.registrationNumber}
+                                  type="button"
+                                  onClick={() => {
+                                    setLoginIdentifier(acc.email);
+                                    setLoginPassword(acc.password);
+                                    setErrorMessage(null);
+                                  }}
+                                  className={`px-2.5 py-1 text-[11px] font-mono rounded transition-colors cursor-pointer ${
+                                    isMulti
+                                      ? 'bg-emerald-100 hover:bg-emerald-200 border border-emerald-400 text-emerald-950 font-bold'
+                                      : 'bg-slate-100 hover:bg-slate-200 border border-slate-300 text-slate-800'
+                                  }`}
+                                  title={isMulti ? 'Akun Demo: Terdaftar 2x di Level 1' : undefined}
+                                >
+                                  {acc.fullName.split(' ')[0]} ({acc.registrationNumber}{isMulti ? ' · Demo 2x Lv 1' : ''})
+                                </button>
+                              );
+                            })}
                           </div>
                         </div>
                       </form>
@@ -960,7 +1300,7 @@ export const RegistrationWorkspace: React.FC<RegistrationWorkspaceProps> = ({
                 /* ==============================================================
                     CONDITION 2: ACCOUNT IS ACTIVE -> STEP 2 (ENROLL IN 4 LEVELS)
                    ============================================================== */
-                <div className="space-y-8">
+                <div id="step-2-program-selection" className="space-y-8 scroll-mt-24">
                   {/* Active Account Identity Card */}
                   <div className="bg-white border border-emerald-300 rounded-xl p-5 sm:p-6 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4">
                     <div className="flex items-start sm:items-center gap-4">
@@ -980,7 +1320,7 @@ export const RegistrationWorkspace: React.FC<RegistrationWorkspaceProps> = ({
                           {activeAccount.fullName}
                         </h2>
                         <p className="text-xs text-slate-600">
-                          {activeAccount.gender || 'Laki-laki'} · {activeAccount.email} · {activeAccount.whatsapp} · {activeAccount.city || 'Indonesia'}
+                          {activeAccount.gender || 'Laki-laki'} · {activeAccount.email} · {formatWhatsAppNumber(activeAccount.whatsapp) || activeAccount.whatsapp} · {activeAccount.city || 'Indonesia'}
                         </p>
                       </div>
                     </div>
@@ -1020,10 +1360,10 @@ export const RegistrationWorkspace: React.FC<RegistrationWorkspaceProps> = ({
                     <div className="p-4 rounded-xl bg-emerald-900/60 border border-emerald-800 text-center shrink-0">
                       <p className="text-xs text-emerald-200">Biaya per Level</p>
                       <p className="text-xl font-bold text-white font-mono mt-0.5">
-                        Rp 510.000
+                        {formatIDR(programs[0]?.tuitionIDR || 510000)}
                       </p>
                       <p className="text-[11px] font-mono text-emerald-300 mt-0.5">
-                        Cicilan 6x: Rp 85.000 / bulan
+                        Cicilan 6x: {formatIDR(Math.round((programs[0]?.tuitionIDR || 510000) / 6))} / bulan
                       </p>
                     </div>
                   </div>
@@ -1035,16 +1375,45 @@ export const RegistrationWorkspace: React.FC<RegistrationWorkspaceProps> = ({
                       const matchingReg = accountRegistrations.find(
                         (r) => r.selectedProgramId === prog.id
                       );
-                      const isClosed = prog.registrationOpen === false;
-                      const isSelectedToEnroll = targetedProgramId === prog.id;
-
                       const progSchedules = schedules.filter((s) => s.programId === prog.id);
-                      const defaultSchedule = progSchedules[0] || schedules[0] || CLASS_SCHEDULES[0];
+                      const isClosed = !isProgramHasAnyOpenSchedule(prog, schedules);
+                      const isSelectedToEnroll = targetedProgramId === prog.id;
+                      const nextAvailableSchedule = getNextAvailableOpenScheduleForProgram(
+                        prog,
+                        schedules,
+                        accountRegistrations,
+                        programs
+                      );
+
+                      const defaultSchedule =
+                        (isEnrolled ? nextAvailableSchedule : null) ||
+                        getPreferredScheduleForProgram(prog, schedules);
+                      const selectedSchForProg = isSelectedToEnroll
+                        ? progSchedules.find((s) => s.id === targetedScheduleId)
+                        : undefined;
+                      const displaySchedule =
+                        selectedSchForProg &&
+                        (isScheduleRegistrationOpen(selectedSchForProg, prog) || isClosed)
+                          ? selectedSchForProg
+                          : defaultSchedule;
+                      const displayAngkatan =
+                        displaySchedule?.angkatan?.trim() || prog.angkatan || 'Angkatan 1';
+                      const alreadyEnrolledInDisplayedBatch = findExistingBatchEnrollment(
+                        accountRegistrations,
+                        prog.id,
+                        displayAngkatan,
+                        schedules,
+                        programs
+                      );
+                      const displayStartDate =
+                        displaySchedule?.startDate || prog.startDate || '19 November 2026';
+                      const displayDays = displaySchedule?.days || prog.scheduleDays;
+                      const displayTime = displaySchedule?.timeWIB || prog.scheduleTime;
 
                       return (
                         <div
                           key={prog.id}
-                          className={`rounded-xl border transition-all flex flex-col justify-between overflow-hidden ${
+                          className={`rounded-xl border transition-all flex flex-col justify-between relative ${
                             isEnrolled
                               ? 'bg-emerald-50/50 border-emerald-300'
                               : isSelectedToEnroll
@@ -1053,10 +1422,10 @@ export const RegistrationWorkspace: React.FC<RegistrationWorkspaceProps> = ({
                           }`}
                         >
                           {/* Card Header */}
-                          <div className="p-5 sm:p-6 border-b border-slate-100 space-y-2">
+                          <div className="p-5 sm:p-6 border-b border-slate-100 space-y-2 rounded-t-xl">
                             <div className="flex items-center justify-between gap-2">
                               <span className="text-xs font-mono font-bold text-emerald-800 px-2.5 py-0.5 rounded-md bg-emerald-100">
-                                {prog.code} · {prog.angkatan || 'Angkatan 1'}
+                                {prog.code} · {displayAngkatan}
                               </span>
                               <span className="text-xs font-semibold text-slate-500">
                                 {prog.category === 'shorof' ? 'Morfologi Arab' : 'Sintaksis Nahwu'}
@@ -1083,9 +1452,22 @@ export const RegistrationWorkspace: React.FC<RegistrationWorkspaceProps> = ({
                           {/* Card Body: Schedule & Pricing */}
                           <div className="p-5 sm:p-6 space-y-3 text-xs text-slate-700 bg-slate-50/50">
                             <div className="flex items-center justify-between">
+                              <span className="text-slate-500">Angkatan Program</span>
+                              <span className="font-semibold text-emerald-900 bg-emerald-100/70 px-2 py-0.5 rounded border border-emerald-300">
+                                {displayAngkatan}
+                              </span>
+                            </div>
+                            <div className="flex items-center justify-between">
+                              <span className="text-slate-500">Mulai Program</span>
+                              <span className="font-mono font-bold text-emerald-900 flex items-center gap-1.5 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+                                <Calendar className="w-3.5 h-3.5 text-emerald-800" />
+                                <span>{displayStartDate}</span>
+                              </span>
+                            </div>
+                            <div className="flex items-center justify-between">
                               <span className="text-slate-500">Jadwal Kelas Malam</span>
                               <span className="font-mono font-semibold text-slate-900">
-                                {prog.scheduleDays} ({prog.scheduleTime})
+                                {displayDays} ({displayTime})
                               </span>
                             </div>
                             <div className="flex items-center justify-between">
@@ -1108,71 +1490,69 @@ export const RegistrationWorkspace: React.FC<RegistrationWorkspaceProps> = ({
                           </div>
 
                           {/* Card Footer: Status & Actions */}
-                          <div className="p-5 sm:p-6 bg-white border-t border-slate-100 space-y-3">
-                            {isEnrolled ? (
-                              <div className="space-y-3">
-                                <div className="p-3 bg-emerald-100/70 border border-emerald-300 rounded-lg flex items-center justify-between text-xs">
-                                  <div className="flex items-center gap-2 text-emerald-950 font-semibold">
-                                    <CheckCircle2 className="w-4 h-4 text-emerald-800 shrink-0" />
-                                    <span>Akun Ini Sudah Terdaftar di Level Ini</span>
-                                  </div>
-                                  {matchingReg && (
-                                    <span className="font-mono font-bold text-emerald-900">
-                                      {matchingReg.registrationNumber}
-                                    </span>
-                                  )}
-                                </div>
-                                <div className="flex items-center gap-2">
-                                  <a
-                                    href="./pelajar.html"
-                                    className="flex-1 inline-flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-semibold text-white bg-emerald-900 hover:bg-emerald-800 rounded-lg transition-colors"
-                                  >
-                                    <GraduationCap className="w-3.5 h-3.5" />
-                                    <span>Buka di Pelajar.html</span>
-                                  </a>
-                                  {matchingReg && (
-                                    <button
-                                      type="button"
-                                      onClick={() => handleDownloadReceipt(matchingReg)}
-                                      className="inline-flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors"
-                                    >
-                                      <Download className="w-3.5 h-3.5" />
-                                      <span>Bukti</span>
-                                    </button>
-                                  )}
-                                </div>
-                              </div>
-                            ) : isClosed ? (
+                          <div className="p-5 sm:p-6 bg-white border-t border-slate-100 space-y-3 rounded-b-xl">
+                            {isClosed ? (
                               <div className="p-3 bg-rose-50 border border-rose-200 rounded-lg text-xs text-rose-900 flex items-center gap-2 font-medium">
                                 <AlertCircle className="w-4 h-4 text-rose-700 shrink-0" />
                                 <span>Pendaftaran Level Ini Sedang Ditutup (OFF) oleh Superadmin</span>
                               </div>
                             ) : isSelectedToEnroll ? (
                               /* Interactive 1-Click Enrollment Expansion for Selected Level */
+                              (() => {
+                                const activeScheduleAngkatan = displayAngkatan;
+                                return (
                               <div className="space-y-3 pt-2">
+                                <div className="p-2.5 bg-emerald-50/80 border border-emerald-200 rounded-lg text-xs flex items-center justify-between">
+                                  <span className="text-slate-700 font-medium">Angkatan Pembelajaran:</span>
+                                  <span className="font-bold text-emerald-900 bg-white px-2 py-0.5 rounded border border-emerald-300">
+                                    {activeScheduleAngkatan}
+                                  </span>
+                                </div>
+                                {isEnrolled && (
+                                  <p className="text-[11px] text-emerald-800 bg-emerald-50 p-2.5 rounded-lg border border-emerald-200 font-medium leading-relaxed">
+                                    ℹ️ Anda sedang mendaftar ulang untuk <strong>{prog.title} ({activeScheduleAngkatan})</strong>. Seluruh data kelulusan, nilai, dan bukti angkatan sebelumnya tidak akan terhapus dan tetap tersimpan utuh di akun Anda.
+                                  </p>
+                                )}
                                 <div className="space-y-2">
                                   <label
                                     htmlFor={`sch-select-${prog.id}`}
                                     className="block text-xs font-semibold text-slate-800"
                                   >
-                                    Pilih Jadwal Kelas Online Malam:
+                                    Pilih Jadwal Kelas Online (1 Angkatan = 1 Kelas):
                                   </label>
-                                  <select
+                                  <ScheduleClassSelector
                                     id={`sch-select-${prog.id}`}
-                                    value={targetedScheduleId}
-                                    onChange={(e) => {
-                                      setTargetedScheduleId(e.target.value);
-                                      onSelectSchedule(e.target.value);
+                                    schedules={progSchedules.filter((sch) =>
+                                      isScheduleRegistrationOpen(sch, prog)
+                                    )}
+                                    selectedScheduleId={displaySchedule.id}
+                                    programAngkatan={prog.angkatan || 'Angkatan 1'}
+                                    onSelect={(schId) => {
+                                      hasManuallySelectedScheduleRef.current = true;
+                                      setTargetedScheduleId(schId);
+                                      onSelectSchedule(schId);
                                     }}
-                                    className="w-full px-3 py-2 text-xs bg-white border border-slate-300 rounded-lg text-slate-900 focus:outline-none focus:border-emerald-800"
-                                  >
-                                    {progSchedules.map((sch) => (
-                                      <option key={sch.id} value={sch.id}>
-                                        {sch.batchCode} · Hari {sch.days} ({sch.timeWIB})
-                                      </option>
-                                    ))}
-                                  </select>
+                                    isScheduleAlreadyEnrolled={(sch) => {
+                                      const schAngkatan =
+                                        sch.angkatan?.trim() || prog.angkatan || 'Angkatan 1';
+                                      return Boolean(
+                                        findExistingBatchEnrollment(
+                                          accountRegistrations,
+                                          prog.id,
+                                          schAngkatan,
+                                          schedules,
+                                          programs
+                                        )
+                                      );
+                                    }}
+                                  />
                                 </div>
+
+                                {alreadyEnrolledInDisplayedBatch && (
+                                  <div className="p-2.5 bg-amber-50 border border-amber-300 rounded-lg text-[11px] text-amber-950 font-medium">
+                                    Anda sudah terdaftar pada Level {prog.levelNumber} · {displayAngkatan} ({alreadyEnrolledInDisplayedBatch.registrationNumber}). Tidak dapat mendaftar dua kali pada level & angkatan yang sama.
+                                  </div>
+                                )}
 
                                 <div className="space-y-1">
                                   <label
@@ -1186,34 +1566,117 @@ export const RegistrationWorkspace: React.FC<RegistrationWorkspaceProps> = ({
                                     type="text"
                                     value={learningGoal}
                                     onChange={(e) => setLearningGoal(e.target.value)}
-                                    placeholder="Contoh: Menguasai baca kitab gundul..."
+                                    placeholder={isEnrolled ? "Contoh: Mengulang dan memantapkan kaidah di angkatan baru..." : "Contoh: Menguasai baca kitab gundul..."}
                                     className="w-full px-3 py-2 text-xs bg-white border border-slate-300 rounded-lg text-slate-900 focus:outline-none focus:border-emerald-800"
                                   />
                                 </div>
 
-                                <button
-                                  type="button"
-                                  onClick={() => handleConfirmEnrollment(prog)}
-                                  className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 text-xs font-semibold text-white bg-emerald-900 hover:bg-emerald-800 rounded-lg transition-colors shadow-xs"
-                                >
-                                  <span>Konfirmasi Pendaftaran Level {prog.levelNumber} ({formatIDR(prog.tuitionIDR)})</span>
-                                  <ArrowRight className="w-3.5 h-3.5" />
-                                </button>
+                                <div className="flex items-center gap-2">
+                                  <button
+                                    type="button"
+                                    disabled={Boolean(alreadyEnrolledInDisplayedBatch)}
+                                    onClick={() => handleConfirmEnrollment(prog)}
+                                    className="flex-1 inline-flex items-center justify-center gap-2 px-4 py-2.5 text-xs font-semibold text-white bg-emerald-900 hover:bg-emerald-800 disabled:bg-slate-300 disabled:text-slate-600 disabled:cursor-not-allowed rounded-lg transition-colors shadow-xs cursor-pointer"
+                                  >
+                                    <span>
+                                      {isEnrolled
+                                        ? `Konfirmasi Daftar Ulang ${activeScheduleAngkatan} (${formatIDR(prog.tuitionIDR)})`
+                                        : `Konfirmasi Pendaftaran Level ${prog.levelNumber} - ${activeScheduleAngkatan} (${formatIDR(prog.tuitionIDR)})`}
+                                    </span>
+                                    <ArrowRight className="w-3.5 h-3.5" />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setTargetedProgramId('');
+                                      setErrorMessage(null);
+                                    }}
+                                    className="px-3 py-2.5 text-xs font-medium text-slate-600 hover:bg-slate-100 rounded-lg border border-slate-300 cursor-pointer"
+                                  >
+                                    Batal
+                                  </button>
+                                </div>
+                              </div>
+                                );
+                              })()
+                            ) : isEnrolled ? (
+                              <div className="space-y-3">
+                                <div className="p-3 bg-emerald-100/70 border border-emerald-300 rounded-lg flex items-center justify-between text-xs">
+                                  <div className="flex items-center gap-2 text-emerald-950 font-semibold">
+                                    <CheckCircle2 className="w-4 h-4 text-emerald-800 shrink-0" />
+                                    <span>Akun Ini Sudah Terdaftar di Level Ini</span>
+                                  </div>
+                                  {matchingReg && (
+                                    <span className="font-mono font-bold text-emerald-900">
+                                      {matchingReg.registrationNumber}
+                                    </span>
+                                  )}
+                                </div>
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <a
+                                    href="./pelajar.html"
+                                    className="flex-1 inline-flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-semibold text-white bg-emerald-900 hover:bg-emerald-800 rounded-lg transition-colors"
+                                  >
+                                    <GraduationCap className="w-3.5 h-3.5" />
+                                    <span>Buka di Pelajar.html</span>
+                                  </a>
+                                  {nextAvailableSchedule ? (
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        hasManuallySelectedScheduleRef.current = false;
+                                        setTargetedProgramId(prog.id);
+                                        onSelectProgram(prog.id);
+                                        setTargetedScheduleId(nextAvailableSchedule.id);
+                                        onSelectSchedule(nextAvailableSchedule.id);
+                                        setErrorMessage(null);
+                                      }}
+                                      className="inline-flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-semibold text-emerald-950 bg-white hover:bg-emerald-50 border border-emerald-300 rounded-lg transition-colors cursor-pointer"
+                                      title="Daftar ulang untuk mengikuti kelas di angkatan baru tanpa menghapus data sebelumnya"
+                                    >
+                                      <RotateCcw className="w-3.5 h-3.5 text-emerald-700" />
+                                      <span>Daftar Ulang ({nextAvailableSchedule.angkatan?.trim() || prog.angkatan || 'Angkatan Baru'})</span>
+                                    </button>
+                                  ) : (
+                                    <span
+                                      className="inline-flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-medium text-emerald-900 bg-emerald-50 border border-emerald-200 rounded-lg"
+                                      title="Anda sudah terdaftar pada angkatan aktif untuk level ini"
+                                    >
+                                      <span>
+                                        Terdaftar (
+                                        {matchingReg
+                                          ? getRegistrationAngkatanLabel(matchingReg, schedules, programs)
+                                          : displayAngkatan}
+                                        )
+                                      </span>
+                                    </span>
+                                  )}
+                                  {matchingReg && (
+                                    <button
+                                      type="button"
+                                      onClick={() => handleDownloadReceipt(matchingReg)}
+                                      className="inline-flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors"
+                                    >
+                                      <Download className="w-3.5 h-3.5" />
+                                      <span>Bukti</span>
+                                    </button>
+                                  )}
+                                </div>
                               </div>
                             ) : (
                               <button
                                 type="button"
                                 onClick={() => {
+                                  hasManuallySelectedScheduleRef.current = false;
                                   setTargetedProgramId(prog.id);
                                   onSelectProgram(prog.id);
-                                  if (progSchedules.length > 0) {
-                                    setTargetedScheduleId(progSchedules[0].id);
-                                    onSelectSchedule(progSchedules[0].id);
-                                  }
+                                  const initialSchId = defaultSchedule.id;
+                                  setTargetedScheduleId(initialSchId);
+                                  onSelectSchedule(initialSchId);
                                 }}
                                 className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 text-xs font-semibold text-white bg-slate-900 hover:bg-emerald-900 rounded-lg transition-colors"
                               >
-                                <span>Pilih & Daftar Level {prog.levelNumber} Ini →</span>
+                                <span>Pilih & Daftar Level {prog.levelNumber} ({defaultSchedule.angkatan?.trim() || prog.angkatan || 'Angkatan 1'}) →</span>
                               </button>
                             )}
                           </div>
@@ -1224,103 +1687,19 @@ export const RegistrationWorkspace: React.FC<RegistrationWorkspaceProps> = ({
                 </div>
               )}
             </div>
-          )
-        ) : (
-          /* Lookup & Registrant Directory Page */
-          <div className="mt-10 bg-white border border-slate-200 rounded-xl p-6 sm:p-8 space-y-6">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-6 border-b border-slate-200">
-              <div>
-                <h2 className="text-lg font-semibold text-slate-900">
-                  Direktori & Status Verifikasi Peserta Tadribul Lughah
-                </h2>
-                <p className="text-xs text-slate-600 mt-1">
-                  Ketik Nomor Registrasi, nama peserta, atau level program pada kolom pencarian di samping.
-                </p>
-              </div>
-
-              <div className="relative w-full sm:w-80">
-                <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
-                <input
-                  type="search"
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="Cari No. Registrasi / Nama..."
-                  aria-label="Cari nomor registrasi atau nama peserta"
-                  className="w-full pl-9 pr-4 py-2 text-xs bg-slate-50 border border-slate-300 rounded-lg focus:outline-none focus:border-emerald-800 text-slate-900"
-                />
-              </div>
-            </div>
-
-            {filteredRegistrations.length === 0 ? (
-              <div className="py-12 text-center space-y-2">
-                <FileText className="w-8 h-8 text-slate-400 mx-auto" />
-                <p className="text-sm font-medium text-slate-800">
-                  Data pendaftar tidak ditemukan
-                </p>
-                <p className="text-xs text-slate-500">
-                  Periksa kembali Nomor Registrasi atau kata kunci pencarian Anda.
-                </p>
-              </div>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-left border-collapse">
-                  <thead>
-                    <tr className="border-b border-slate-200 text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
-                      <th className="py-3 pr-4">No. Registrasi</th>
-                      <th className="py-3 px-4">Nama Peserta & Domisili</th>
-                      <th className="py-3 px-4">Level & Jadwal Online</th>
-                      <th className="py-3 px-4">Biaya Level</th>
-                      <th className="py-3 px-4">Status</th>
-                      <th className="py-3 pl-4 text-right">Aksi</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-200 text-xs">
-                    {filteredRegistrations.map((rec) => (
-                      <tr key={rec.registrationNumber} className="hover:bg-slate-50">
-                        <td className="py-4 pr-4 font-mono tabular-nums font-semibold text-emerald-900 whitespace-nowrap">
-                          {rec.registrationNumber}
-                        </td>
-                        <td className="py-4 px-4">
-                          <p className="font-semibold text-slate-900">
-                            {rec.fullName}
-                          </p>
-                          <p className="text-slate-500 mt-0.5">
-                            {rec.gender || 'Laki-laki'} · {rec.occupation} · {rec.city}
-                          </p>
-                        </td>
-                        <td className="py-4 px-4">
-                          <p className="font-medium text-slate-900">
-                            {rec.selectedProgramName}
-                          </p>
-                          <p className="font-mono tabular-nums text-slate-500 mt-0.5">
-                            {rec.selectedScheduleSummary}
-                          </p>
-                        </td>
-                        <td className="py-4 px-4 font-mono tabular-nums font-semibold text-slate-900 whitespace-nowrap">
-                          {formatIDR(rec.totalTuitionIDR)}
-                        </td>
-                        <td className="py-4 px-4 text-emerald-800 font-medium">
-                          {rec.status}
-                        </td>
-                        <td className="py-4 pl-4 text-right whitespace-nowrap">
-                          <button
-                            type="button"
-                            onClick={() => handleDownloadReceipt(rec)}
-                            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-700 bg-white border border-slate-200 rounded-md hover:bg-slate-100 transition-colors"
-                          >
-                            <Download className="w-3.5 h-3.5" />
-                            Unduh Bukti
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
-        )}
+          )}
       </div>
+
+      {activeAccount && (
+        <EnrollmentConfirmModal
+          pending={pendingConfirmEnrollment}
+          studentName={activeAccount.fullName}
+          studentEmail={activeAccount.email}
+          studentWhatsapp={activeAccount.whatsapp}
+          onCancel={() => setPendingConfirmEnrollment(null)}
+          onConfirm={executeConfirmedEnrollment}
+        />
+      )}
     </section>
   );
 };

@@ -17,8 +17,10 @@
       content="Halaman terpisah untuk membaca modul, kaidah nahwu/shorof, dan contoh i'rab secara lengkap."
     />
     <script>
-      // Proteksi Akses Halaman Terpisah: Wajib login akun pelajar
-      if (!sessionStorage.getItem('tl_student_verified_session_v1')) {
+      // Proteksi Akses Halaman Terpisah: Wajib login akun pelajar atau Superadmin
+      const isStudent = Boolean(sessionStorage.getItem('tl_student_verified_session_v1'));
+      const isSuper = Boolean(sessionStorage.getItem('tl_superadmin_verified_session_v1'));
+      if (!isStudent && !isSuper) {
         window.location.replace('./login.html?role=pelajar');
       }
     </script>

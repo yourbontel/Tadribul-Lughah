@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="id">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Ruang Ujian & Latihan Pekanan (latihan.html) — Tadribul Lughah</title>
+    <meta
+      name="description"
+      content="Halaman ujian dan latihan mandiri resmi Tadribul Lughah. Sistem 1 kali pengerjaan berbobot nilai."
+    />
+    <script>
+      // Proteksi Akses Halaman Terpisah: Wajib login akun pelajar atau Superadmin
+      const isStudent = Boolean(sessionStorage.getItem('tl_student_verified_session_v1'));
+      const isSuper = Boolean(sessionStorage.getItem('tl_superadmin_verified_session_v1'));
+      if (!isStudent && !isSuper) {
+        window.location.replace('./login.html?role=pelajar');
+      }
+    </script>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600;9..144,700&family=IBM+Plex+Mono:wght@400;600&family=Noto+Naskh+Arabic:wght@500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+  </head>
+  <body>
+    <div id="latihan-root"></div>
+    <script type="module" src="/src/latihan.tsx"></script>
+  </body>
+</html>

@@ -9,21 +9,42 @@ import {
   CLASS_SCHEDULES,
   ProgramTrack,
   ClassSchedule,
-  formatIDR
+  formatIDR,
+  applyScheduleStartDateOverrides,
+  syncProgramStatesFromServer
 } from './data/arabicAcademyData';
 import {
   getStudentAccounts,
   getStudentRegistrations,
+  syncRegistrationsFromServer,
   StudentAccount,
-  saveStudentAccount
+  saveStudentAccount,
+  saveStudentQuizScore,
+  isPekanExamAlreadySubmitted,
+  syncQuizScoresFromServer
 } from './utils/studentAccountStore';
 import {
   getWeeklyPekanContent,
   getProgramPekanList,
   WeeklyPekanData,
   saveCustomMateriOverride,
-  extractYouTubeId
+  syncCustomMateriFromServer,
+  extractOptionalYouTubeId,
+  getPekanYouTubeId,
+  isValidYouTubeVideoInput,
+  isPekanUnlocked,
+  savePekanUnlockState,
+  syncPekanUnlockFromServer,
+  getNormalizedPekanAudioItems
 } from './data/moduleContentData';
+import { GoogleDriveAudioPlayer } from './components/GoogleDriveAudioPlayer';
+import {
+  fetchYouTubeMetadata,
+  YouTubeVideoMetadata
+} from './utils/youtubeVideoMetadata';
+import { auth, isUserSuperAdmin, SUPERADMIN_EMAIL } from './firebase';
+import { SUPERADMIN_SESSION_KEY } from './LoginApp';
+import { onAuthStateChanged } from 'firebase/auth';
 import {
   ArrowLeft,
   ArrowRight,
@@ -34,20 +55,91 @@ import {
   HelpCircle,
   ListChecks,
   Lock,
+  Unlock,
   Printer,
   Sparkles,
   Video,
   FileText,
   PlayCircle,
-  Youtube,
   ExternalLink,
   Share2,
   ShieldCheck,
   Settings,
   Edit3,
   Save,
-  X
+  X,
+  Award,
+  RotateCcw,
+  Trophy,
+  Check,
+  AlertCircle,
+  Plus,
+  AlertTriangle,
+  ChevronRight,
+  Headphones,
+  Loader2
 } from 'lucide-react';
+
+export function getScoreGradeInfo(score: number) {
+  if (score >= 100) {
+    return {
+      arabic: 'مُمْتَازٌ مُرْتَفِعٌ',
+      label: 'Mumtaz Murtafi\' (Sempurna 100)',
+      color: 'text-amber-900 bg-amber-50 border-amber-300',
+      badgeColor: 'bg-amber-600 text-white',
+      borderRing: 'border-amber-400 ring-2 ring-amber-200',
+      desc: 'Maa syaa Allah! Nilai sempurna 100 tanpa kesalahan. Penguasaan kaidah sangat istimewa.'
+    };
+  }
+  if (score >= 85) {
+    return {
+      arabic: 'مُمْتَازٌ',
+      label: 'Mumtaz (Sangat Memuaskan / A)',
+      color: 'text-emerald-950 bg-emerald-50 border-emerald-300',
+      badgeColor: 'bg-emerald-700 text-white',
+      borderRing: 'border-emerald-400 ring-2 ring-emerald-200',
+      desc: 'Barakallahu fiik! Pemahaman kaidah dan penguasaan materi sangat baik.'
+    };
+  }
+  if (score >= 75) {
+    return {
+      arabic: 'جَيِّدٌ جِدًّا',
+      label: 'Jayyid Jiddan (Sangat Baik / B+)',
+      color: 'text-teal-950 bg-teal-50 border-teal-300',
+      badgeColor: 'bg-teal-700 text-white',
+      borderRing: 'border-teal-400 ring-2 ring-teal-200',
+      desc: 'Alhamdulillah, capaian sangat baik dan tuntas melampaui batas KKM.'
+    };
+  }
+  if (score >= 70) {
+    return {
+      arabic: 'جَيِّدٌ',
+      label: 'Jayyid (Baik / Lulus KKM)',
+      color: 'text-blue-950 bg-blue-50 border-blue-300',
+      badgeColor: 'bg-blue-700 text-white',
+      borderRing: 'border-blue-400 ring-2 ring-blue-200',
+      desc: 'Memenuhi Kriteria Ketuntasan Minimal (KKM 70). Pertahankan dan terus tingkatkan!'
+    };
+  }
+  if (score >= 50) {
+    return {
+      arabic: 'مَقْبُولٌ',
+      label: 'Maqbul (Cukup / Perlu Penguatan)',
+      color: 'text-amber-950 bg-amber-50 border-amber-300',
+      badgeColor: 'bg-amber-700 text-white',
+      borderRing: 'border-amber-300',
+      desc: 'Belum mencapai standar KKM (70). Disarankan membaca kembali bab kaidah dan menyimak rekaman video pemateri.'
+    };
+  }
+  return {
+    arabic: 'رَاسِبٌ / إِعَادَة',
+    label: 'I\'adah (Perlu Penguatan Materi)',
+    color: 'text-rose-950 bg-rose-50 border-rose-300',
+    badgeColor: 'bg-rose-700 text-white',
+    borderRing: 'border-rose-400 ring-2 ring-rose-200',
+    desc: 'Nilai di bawah batas kelulusan. Pelajari kembali materi dan catatan kaidah untuk memperkuat pemahaman.'
+  };
+}
 
 export default function ModuleReaderApp() {
   const [studentSession, setStudentSession] = useState<{
@@ -60,40 +152,122 @@ export default function ModuleReaderApp() {
   const [enrolledProgramIds, setEnrolledProgramIds] = useState<string[]>([]);
   const [authChecking, setAuthChecking] = useState<boolean>(true);
 
-  // Read URL parameters: ?program=tl-level-1&pekan=1
+  // Check if visitor is verified Superadmin (mazharhajid@gmail.com)
+  const [isSuperAdmin, setIsSuperAdmin] = useState<boolean>(() => {
+    try {
+      const saved = sessionStorage.getItem(SUPERADMIN_SESSION_KEY);
+      return saved === SUPERADMIN_EMAIL;
+    } catch {
+      return false;
+    }
+  });
+
+  // Read URL parameters: ?program=tl-level-1&pekan=1&schedule=sch-lv1-malam
   const [selectedProgramId, setSelectedProgramId] = useState<string>(() => {
     const params = new URLSearchParams(window.location.search);
     return params.get('program') || 'tl-level-1';
   });
 
+  const [selectedScheduleId, setSelectedScheduleId] = useState<string>(() => {
+    const params = new URLSearchParams(window.location.search);
+    return params.get('schedule') || '';
+  });
+
+  const [enrolledScheduleMap, setEnrolledScheduleMap] = useState<Record<string, string>>({});
+
   const [selectedPekan, setSelectedPekan] = useState<number>(() => {
     const params = new URLSearchParams(window.location.search);
     const p = parseInt(params.get('pekan') || '', 10);
-    if (!isNaN(p) && p >= 1 && p <= 12) return p;
+    if (!isNaN(p) && p >= 1 && p <= 24) return p;
     const mod = parseInt(params.get('module') || '0', 10);
     return isNaN(mod) ? 1 : mod * 3 + 1;
   });
 
-  const [activeTab, setActiveTab] = useState<'video' | 'silabus' | 'kaidah' | 'contoh' | 'kuis' | 'mufradat'>('video');
-  const [customYoutubeUrl, setCustomYoutubeUrl] = useState<string>('');
-  const [showCustomUrlInput, setShowCustomUrlInput] = useState<boolean>(false);
+  const [activeTab, setActiveTab] = useState<'video' | 'audio' | 'silabus' | 'kaidah' | 'contoh' | 'kuis' | 'mufradat'>('video');
   const [quizAnswers, setQuizAnswers] = useState<Record<number, number>>({});
   const [quizSubmitted, setQuizSubmitted] = useState<Record<number, boolean>>({});
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [materiVersion, setMateriVersion] = useState<number>(0);
+  const [showExamConfirmModal, setShowExamConfirmModal] = useState<boolean>(false);
 
-  // Quick edit modal states for Superadmin
+  // Quick edit modal states (EXCLUSIVELY for Superadmin)
   const [isQuickEditOpen, setIsQuickEditOpen] = useState<boolean>(false);
-  const [quickEditYoutube, setQuickEditYoutube] = useState<string>('');
+  const [quickEditYoutubeInput, setQuickEditYoutubeInput] = useState<string>('');
   const [quickEditTitle, setQuickEditTitle] = useState<string>('');
   const [quickEditChannel, setQuickEditChannel] = useState<string>('');
+  const [isQuickFetchingMeta, setIsQuickFetchingMeta] = useState<boolean>(false);
+  const [quickYtMeta, setQuickYtMeta] = useState<YouTubeVideoMetadata | null>(null);
+  const [quickInitialYtId, setQuickInitialYtId] = useState<string>('');
 
   useEffect(() => {
+    if (!isQuickEditOpen) return;
+    const ytId = extractOptionalYouTubeId(quickEditYoutubeInput);
+    if (!ytId || ytId === quickInitialYtId) return;
+
+    const timer = setTimeout(async () => {
+      setIsQuickFetchingMeta(true);
+      try {
+        const meta = await fetchYouTubeMetadata(quickEditYoutubeInput);
+        if (meta) {
+          setQuickYtMeta(meta);
+          if (meta.title) setQuickEditTitle(meta.title);
+          if (meta.channel) setQuickEditChannel(meta.channel);
+        }
+      } finally {
+        setIsQuickFetchingMeta(false);
+      }
+    }, 350);
+
+    return () => clearTimeout(timer);
+  }, [isQuickEditOpen, quickEditYoutubeInput, quickInitialYtId]);
+
+  useEffect(() => {
+    syncCustomMateriFromServer().catch(() => {});
+    syncPekanUnlockFromServer().catch(() => {});
+    syncProgramStatesFromServer().catch(() => {});
     const handleMateriUpdated = () => {
       setMateriVersion((v) => v + 1);
     };
+    const handlePekanUnlockUpdated = () => {
+      setMateriVersion((v) => v + 1);
+    };
+    const handleProgramStatesUpdated = () => {
+      setMateriVersion((v) => v + 1);
+    };
+    const handleVisibilityRefresh = () => {
+      if (document.visibilityState === 'visible') {
+        syncCustomMateriFromServer().catch(() => {});
+        syncPekanUnlockFromServer().catch(() => {});
+        syncProgramStatesFromServer().catch(() => {});
+      }
+    };
     window.addEventListener('materi-updated', handleMateriUpdated);
-    return () => window.removeEventListener('materi-updated', handleMateriUpdated);
+    window.addEventListener('pekan-unlock-updated', handlePekanUnlockUpdated);
+    window.addEventListener('program-open-updated', handleProgramStatesUpdated);
+    window.addEventListener('storage', handleMateriUpdated);
+    document.addEventListener('visibilitychange', handleVisibilityRefresh);
+    return () => {
+      window.removeEventListener('materi-updated', handleMateriUpdated);
+      window.removeEventListener('pekan-unlock-updated', handlePekanUnlockUpdated);
+      window.removeEventListener('program-open-updated', handleProgramStatesUpdated);
+      window.removeEventListener('storage', handleMateriUpdated);
+      document.removeEventListener('visibilitychange', handleVisibilityRefresh);
+    };
+  }, []);
+
+  // Listen to Firebase Auth to recognize Superadmin
+  useEffect(() => {
+    const unsub = onAuthStateChanged(auth, (user) => {
+      if (user && isUserSuperAdmin(user)) {
+        setIsSuperAdmin(true);
+        try {
+          sessionStorage.setItem(SUPERADMIN_SESSION_KEY, SUPERADMIN_EMAIL);
+        } catch {
+          // Ignore
+        }
+      }
+    });
+    return () => unsub();
   }, []);
 
   useEffect(() => {
@@ -103,43 +277,135 @@ export default function ModuleReaderApp() {
       return;
     }
 
-    try {
-      const parsed = JSON.parse(raw);
-      setStudentSession(parsed);
-
-      const accounts = getStudentAccounts();
-      const match = accounts.find(
-        (a) => a.email.toLowerCase() === (parsed.email || '').toLowerCase()
-      );
-      if (match) {
-        setStudentAccount(match);
-      }
-
-      // Check all programs student is enrolled in
-      const userRegs = getStudentRegistrations(
-        parsed.email || parsed.registrationNumber || '',
-        []
-      );
-      const fromRegs = userRegs.map((r) => r.selectedProgramId);
-      const fromAcc = match?.enrolledProgramIds || [];
-      const combined = Array.from(new Set([...fromRegs, ...fromAcc]));
-      const finalEnrolled =
-        combined.length > 0 ? combined : [match?.enrolledProgramIds?.[0] || 'tl-level-1'];
-      setEnrolledProgramIds(finalEnrolled);
-
-      // Clamp selected level if student is not enrolled in it
-      setSelectedProgramId((prev) => {
-        if (!finalEnrolled.includes(prev)) {
-          return finalEnrolled[0];
+    let isMounted = true;
+    const initData = async () => {
+      try {
+        const parsed = JSON.parse(raw);
+        if (isMounted) {
+          setStudentSession(parsed);
         }
-        return prev;
-      });
-    } catch {
-      // Ignored
-    } finally {
-      setAuthChecking(false);
-    }
+
+        const userIdent = parsed.email || parsed.registrationNumber || '';
+        // Sinkronkan nilai ujian & registrasi dari server cPanel
+        await syncQuizScoresFromServer(userIdent);
+        await syncRegistrationsFromServer().catch(() => {});
+        await syncProgramStatesFromServer().catch(() => {});
+
+        const accounts = getStudentAccounts();
+        const match = accounts.find(
+          (a) =>
+            a.email.toLowerCase() === (parsed.email || '').toLowerCase() ||
+            a.registrationNumber.toUpperCase() === (parsed.registrationNumber || '').toUpperCase()
+        );
+        if (match && isMounted) {
+          setStudentAccount(match);
+        }
+
+        // Check all programs student is enrolled in
+        const userRegs = getStudentRegistrations(
+          parsed.email || parsed.registrationNumber || '',
+          []
+        );
+        const allSchedules = applyScheduleStartDateOverrides(CLASS_SCHEDULES);
+        const schedMap: Record<string, string> = {};
+        for (const r of userRegs) {
+          const matchedSch =
+            allSchedules.find((s) => s.id === r.selectedScheduleId) ||
+            allSchedules.find(
+              (s) => Boolean(r.selectedScheduleSummary) && r.selectedScheduleSummary.includes(s.batchCode)
+            ) ||
+            allSchedules.find((s) => s.programId === r.selectedProgramId);
+          if (r.selectedProgramId && (matchedSch?.id || r.selectedScheduleId)) {
+            schedMap[r.selectedProgramId] = matchedSch?.id || r.selectedScheduleId;
+          }
+        }
+        const fromRegs = userRegs.map((r) => r.selectedProgramId);
+        const fromAcc = match?.enrolledProgramIds || [];
+        const combined = Array.from(new Set([...fromRegs, ...fromAcc]));
+        const finalEnrolled =
+          combined.length > 0 ? combined : [match?.enrolledProgramIds?.[0] || 'tl-level-1'];
+        if (isMounted) {
+          setEnrolledScheduleMap(schedMap);
+          setEnrolledProgramIds(finalEnrolled);
+
+          // Clamp selected level if student is not enrolled in it
+          setSelectedProgramId((prev) => {
+            if (!finalEnrolled.includes(prev)) {
+              return finalEnrolled[0];
+            }
+            return prev;
+          });
+        }
+      } catch {
+        // Ignored
+      } finally {
+        if (isMounted) {
+          setAuthChecking(false);
+        }
+      }
+    };
+
+    initData();
+
+    const handleScoresUpdate = () => {
+      const accounts = getStudentAccounts();
+      const rawSess = sessionStorage.getItem('tl_student_verified_session_v1');
+      if (rawSess) {
+        try {
+          const parsed = JSON.parse(rawSess);
+          const match = accounts.find(
+            (a) =>
+              a.email.toLowerCase() === (parsed.email || '').toLowerCase() ||
+              a.registrationNumber.toUpperCase() === (parsed.registrationNumber || '').toUpperCase()
+          );
+          if (match && isMounted) {
+            setStudentAccount(match);
+          }
+        } catch {
+          // Ignore
+        }
+      }
+    };
+
+    window.addEventListener('quiz-scores-updated', handleScoresUpdate);
+    window.addEventListener('storage', handleScoresUpdate);
+
+    return () => {
+      isMounted = false;
+      window.removeEventListener('quiz-scores-updated', handleScoresUpdate);
+      window.removeEventListener('storage', handleScoresUpdate);
+    };
   }, []);
+
+  const activeProgram =
+    PROGRAM_TRACKS.find((p) => p.id === selectedProgramId) || PROGRAM_TRACKS[0];
+
+  const allResolvedSchedules = React.useMemo(
+    () => applyScheduleStartDateOverrides(CLASS_SCHEDULES),
+    [materiVersion]
+  );
+
+  const urlMatchedSchedule = selectedScheduleId
+    ? allResolvedSchedules.find((s) => s.id === selectedScheduleId)
+    : undefined;
+
+  const enrolledForActive = enrolledScheduleMap[activeProgram.id];
+  const activeSchedule =
+    (urlMatchedSchedule && urlMatchedSchedule.programId === activeProgram.id
+      ? urlMatchedSchedule
+      : undefined) ||
+    (enrolledForActive
+      ? allResolvedSchedules.find((s) => s.id === enrolledForActive)
+      : undefined) ||
+    allResolvedSchedules.find((s) => s.programId === activeProgram.id) ||
+    allResolvedSchedules[0];
+
+  const activeScheduleId =
+    (selectedScheduleId && (!urlMatchedSchedule || urlMatchedSchedule.programId === activeProgram.id)
+      ? selectedScheduleId
+      : '') ||
+    enrolledForActive ||
+    activeSchedule?.id;
 
   // Update URL search parameters when pekan changes
   const handleSelectPekan = (progId: string, pekanNum: number) => {
@@ -153,7 +419,18 @@ export default function ModuleReaderApp() {
     setQuizAnswers({});
     setQuizSubmitted({});
 
-    const newUrl = `${window.location.pathname}?program=${encodeURIComponent(progId)}&pekan=${pekanNum}`;
+    const nextSchedId =
+      progId === activeProgram.id && activeScheduleId
+        ? activeScheduleId
+        : enrolledScheduleMap[progId] ||
+          allResolvedSchedules.find((s) => s.programId === progId)?.id ||
+          '';
+    if (progId !== activeProgram.id && nextSchedId) {
+      setSelectedScheduleId(nextSchedId);
+    }
+
+    const schedParam = nextSchedId ? `&schedule=${encodeURIComponent(nextSchedId)}` : '';
+    const newUrl = `${window.location.pathname}?program=${encodeURIComponent(progId)}&pekan=${pekanNum}${schedParam}`;
     window.history.pushState({ path: newUrl }, '', newUrl);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
@@ -165,67 +442,92 @@ export default function ModuleReaderApp() {
     }, 3500);
   };
 
-  const activeProgram =
-    PROGRAM_TRACKS.find((p) => p.id === selectedProgramId) || PROGRAM_TRACKS[0];
-
-  const activeSchedule =
-    CLASS_SCHEDULES.find((s) => s.programId === activeProgram.id) ||
-    CLASS_SCHEDULES[0];
-
   // Get ONLY the data for the selected pekan with auto-reload on materiVersion update!
   const pekanData: WeeklyPekanData = React.useMemo(
-    () => getWeeklyPekanContent(activeProgram.id, selectedPekan),
-    [activeProgram.id, selectedPekan, materiVersion]
+    () => getWeeklyPekanContent(activeProgram.id, selectedPekan, activeScheduleId),
+    [activeProgram.id, selectedPekan, activeScheduleId, materiVersion]
   );
 
-  const parseYouTubeId = (input: string): string | null => {
-    if (!input) return null;
-    const trimmed = input.trim();
-    const match = trimmed.match(/(?:youtu\.be\/|youtube\.com\/(?:embed\/|v\/|watch\?v=|watch\?.+&v=))([\w-]{11})/);
-    if (match && match[1]) {
-      return match[1];
-    }
-    if (/^[\w-]{11}$/.test(trimmed)) {
-      return trimmed;
-    }
-    return null;
-  };
+  const isCurrentPekanOpen = isPekanUnlocked(activeProgram.id, selectedPekan, activeScheduleId);
 
-  const parsedCustom = parseYouTubeId(customYoutubeUrl);
-  const effectiveVideoId = parsedCustom || pekanData.youtubeVideoId || 'fC9zKq38_54';
+  const effectiveYouTubeId = getPekanYouTubeId(pekanData);
+  const hasPlayableVideo = isValidYouTubeVideoInput(effectiveYouTubeId);
+  const youtubeWatchUrl = effectiveYouTubeId
+    ? `https://www.youtube.com/watch?v=${effectiveYouTubeId}`
+    : '';
+  const youtubeEmbedUrl = effectiveYouTubeId
+    ? `https://www.youtube.com/embed/${effectiveYouTubeId}?rel=0&modestbranding=1`
+    : '';
+  const displayVideoTitle =
+    pekanData.youtubeTitle || pekanData.videoTitle || `Simak Video Materi: ${pekanData.title}`;
+  const displayVideoChannel =
+    pekanData.youtubeChannel || pekanData.videoInstructor || 'Tadribul Lughah Official';
 
   const handleOpenQuickEdit = () => {
-    setQuickEditYoutube(pekanData.youtubeVideoId || '');
-    setQuickEditTitle(pekanData.youtubeTitle || pekanData.title);
-    setQuickEditChannel(pekanData.youtubeChannel || 'Tadribul Lughah Official');
+    if (!isSuperAdmin) {
+      showToast('Akses Ditolak: Hanya Superadmin (mazharhajid@gmail.com) yang diizinkan mengubah link video!');
+      return;
+    }
+    const currentId = getPekanYouTubeId(pekanData);
+    setQuickEditYoutubeInput(currentId ? `https://www.youtube.com/watch?v=${currentId}` : '');
+    setQuickEditTitle(pekanData.youtubeTitle || pekanData.videoTitle || pekanData.title);
+    setQuickEditChannel(pekanData.youtubeChannel || pekanData.videoInstructor || 'Tadribul Lughah Official');
+    setQuickYtMeta(null);
+    setQuickInitialYtId(currentId);
     setIsQuickEditOpen(true);
   };
 
-  const handleSaveQuickEdit = (e: React.FormEvent) => {
+  const handleSaveQuickEdit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const updated: WeeklyPekanData = {
+    if (!isSuperAdmin) {
+      showToast('Akses Ditolak: Hanya Superadmin yang berwenang menyimpan perubahan!');
+      setIsQuickEditOpen(false);
+      return;
+    }
+    const cleanInput = quickEditYoutubeInput.trim();
+    const parsedId = extractOptionalYouTubeId(cleanInput) || cleanInput;
+    const hadFetchedMeta = Boolean(quickYtMeta && quickYtMeta.videoId === parsedId);
+    const freshMeta =
+      !hadFetchedMeta && isValidYouTubeVideoInput(cleanInput) && parsedId !== effectiveYouTubeId
+        ? await fetchYouTubeMetadata(cleanInput)
+        : quickYtMeta;
+    const baseUpdated: WeeklyPekanData = {
       ...pekanData,
-      youtubeVideoId: extractYouTubeId(quickEditYoutube),
-      youtubeTitle: quickEditTitle,
-      youtubeChannel: quickEditChannel
+      youtubeVideoId: parsedId,
+      youtubeTitle: hadFetchedMeta ? quickEditTitle : (freshMeta?.title || quickEditTitle),
+      youtubeChannel: hadFetchedMeta ? quickEditChannel : (freshMeta?.channel || quickEditChannel),
+      videoDriveUrl: '',
+      videoTitle: '',
+      videoInstructor: ''
     };
-    saveCustomMateriOverride(activeProgram.id, selectedPekan, updated);
+    const syncResult = await saveCustomMateriOverride(activeProgram.id, selectedPekan, baseUpdated);
+    setMateriVersion((v) => v + 1);
     setIsQuickEditOpen(false);
-    showToast(`Video materi Pekan ${selectedPekan} berhasil disimpan oleh Superadmin!`);
+    if (syncResult.syncedToServer) {
+      showToast(`Video YouTube Pekan ${selectedPekan} berhasil diperbarui & disinkronkan ke server!`);
+    } else {
+      showToast(
+        `Video tersimpan di browser ini, tetapi gagal sinkron ke server (${syncResult.error || 'api.php tidak merespons'}).`
+      );
+    }
   };
 
-  const allPekanList = getProgramPekanList(activeProgram.id);
+  const allPekanList = getProgramPekanList(activeProgram.id, activeScheduleId);
 
   const pekanCompletionKey = `${activeProgram.id}-pekan-${selectedPekan}`;
   const isPekanDone =
-    studentAccount?.completedModuleKeys.includes(pekanCompletionKey) || false;
+    Array.isArray(studentAccount?.completedModuleKeys) &&
+    studentAccount.completedModuleKeys.includes(pekanCompletionKey);
 
   const handleToggleComplete = () => {
     if (!studentAccount) return;
-    const exists = studentAccount.completedModuleKeys.includes(pekanCompletionKey);
+    const currentCompleted = Array.isArray(studentAccount.completedModuleKeys)
+      ? studentAccount.completedModuleKeys
+      : [];
+    const exists = currentCompleted.includes(pekanCompletionKey);
     const updatedKeys = exists
-      ? studentAccount.completedModuleKeys.filter((k) => k !== pekanCompletionKey)
-      : [...studentAccount.completedModuleKeys, pekanCompletionKey];
+      ? currentCompleted.filter((k) => k !== pekanCompletionKey)
+      : [...currentCompleted, pekanCompletionKey];
 
     const updatedAccount: StudentAccount = {
       ...studentAccount,
@@ -239,6 +541,109 @@ export default function ModuleReaderApp() {
       showToast(`Barakallahu fiik! Materi Pekan ${selectedPekan} telah ditandai tuntas dipelajari.`);
     } else {
       showToast(`Status materi Pekan ${selectedPekan} diperbarui.`);
+    }
+  };
+
+  // --- Weekly Quiz & Grading Calculations ---
+  const quizzes = pekanData.quizzes || [];
+  const totalQuestions = quizzes.length;
+  const defaultWeight = 10;
+  const totalPossiblePoints = quizzes.reduce((sum, q) => sum + (q.points || defaultWeight), 0);
+  const passingThreshold = pekanData.passingScore || 70;
+
+  // Answered questions
+  const answeredCount = quizzes.filter((q) => quizSubmitted[q.id]).length;
+  const isAllAnswered = totalQuestions > 0 && answeredCount === totalQuestions;
+
+  // Earned points
+  const earnedPoints = quizzes.reduce((sum, q) => {
+    if (quizSubmitted[q.id] && quizAnswers[q.id] === q.correctIndex) {
+      return sum + (q.points || defaultWeight);
+    }
+    return sum;
+  }, 0);
+
+  const correctCount = quizzes.filter(
+    (q) => quizSubmitted[q.id] && quizAnswers[q.id] === q.correctIndex
+  ).length;
+
+  const calculatedScore = totalPossiblePoints > 0
+    ? Math.round((earnedPoints / totalPossiblePoints) * 100)
+    : 0;
+
+  const submissionStatus = isPekanExamAlreadySubmitted(
+    studentSession?.email ||
+      studentSession?.registrationNumber ||
+      studentAccount?.email ||
+      studentAccount?.registrationNumber ||
+      '',
+    pekanCompletionKey
+  );
+
+  const isExamLocked =
+    submissionStatus.submitted ||
+    studentAccount?.quizScores?.[pekanCompletionKey] !== undefined;
+
+  const savedScore =
+    submissionStatus.score ?? studentAccount?.quizScores?.[pekanCompletionKey];
+
+  const hasAttempted = isExamLocked || answeredCount > 0;
+  const displayScore = isExamLocked ? (savedScore ?? 0) : calculatedScore;
+  const isPassed = displayScore >= passingThreshold;
+  const gradeInfo = getScoreGradeInfo(displayScore);
+
+  const submissionDateFormatted =
+    submissionStatus.submittedAt || studentAccount?.quizSubmittedAt?.[pekanCompletionKey];
+
+  const handleAnswerOption = (questionId: number, optionIdx: number) => {
+    const nextAnswers = { ...quizAnswers, [questionId]: optionIdx };
+    const nextSubmitted = { ...quizSubmitted, [questionId]: true };
+    setQuizAnswers(nextAnswers);
+    setQuizSubmitted(nextSubmitted);
+
+    // If answering the last question, auto-calculate and save score!
+    const allDone = quizzes.every((q) => q.id === questionId || nextSubmitted[q.id]);
+    if (allDone) {
+      const earned = quizzes.reduce((sum, q) => {
+        const sel = q.id === questionId ? optionIdx : nextAnswers[q.id];
+        return sel === q.correctIndex ? sum + (q.points || defaultWeight) : sum;
+      }, 0);
+      const score = totalPossiblePoints > 0 ? Math.round((earned / totalPossiblePoints) * 100) : 0;
+      const userIdent = studentSession?.email || studentSession?.registrationNumber || studentAccount?.email;
+      if (userIdent) {
+        const updated = saveStudentQuizScore(userIdent, pekanCompletionKey, score);
+        if (updated) {
+          setStudentAccount(updated);
+        }
+      } else if (studentAccount) {
+        setStudentAccount((prev) => {
+          if (!prev) return null;
+          return {
+            ...prev,
+            quizScores: { ...(prev.quizScores || {}), [pekanCompletionKey]: score }
+          };
+        });
+      }
+      showToast(`Alhamdulillah! Latihan selesai dengan nilai: ${score}/100 (${score >= passingThreshold ? 'LULUS KKM' : 'Perlu Penguatan'})`);
+    }
+  };
+
+  const handleResetQuiz = () => {
+    setQuizAnswers({});
+    setQuizSubmitted({});
+    showToast('Latihan soal telah direset. Silakan kerjakan kembali untuk menguji pemahaman!');
+  };
+
+  const handleSaveScoreToAccount = () => {
+    const userIdent = studentSession?.email || studentSession?.registrationNumber || studentAccount?.email;
+    if (!userIdent) {
+      showToast('Silakan login terlebih dahulu untuk menyimpan nilai ke rapor akun Anda.');
+      return;
+    }
+    const updated = saveStudentQuizScore(userIdent, pekanCompletionKey, displayScore);
+    if (updated) {
+      setStudentAccount(updated);
+      showToast(`Nilai ${displayScore}/100 berhasil disimpan ke rapor profil Anda!`);
     }
   };
 
@@ -285,7 +690,7 @@ export default function ModuleReaderApp() {
     showToast(`Rangkuman materi Pekan ${pekanData.pekanNumber} berhasil diunduh!`);
   };
 
-  if (!authChecking && !studentSession) {
+  if (!authChecking && !studentSession && !isSuperAdmin) {
     return (
       <div className="min-h-screen bg-slate-900 flex items-center justify-center p-6 text-slate-100">
         <div className="max-w-md w-full bg-white text-slate-900 border border-slate-200 rounded-2xl p-8 space-y-6 text-center shadow-2xl">
@@ -297,10 +702,10 @@ export default function ModuleReaderApp() {
               HALAMAN TERPISAH: materi.html
             </p>
             <h1 className="text-xl font-bold font-display">
-              Akses Khusus Pelajar Terdaftar
+              Akses Khusus Pelajar Terdaftar & Superadmin
             </h1>
             <p className="text-xs text-slate-600 leading-relaxed">
-              Halaman materi pembelajaran ini terpisah khusus untuk pelajar yang sudah memiliki akun. Silakan login akun terlebih dahulu untuk membaca materi.
+              Halaman materi pembelajaran ini terpisah khusus untuk pelajar yang sudah memiliki akun atau Superadmin. Silakan login terlebih dahulu untuk membaca materi.
             </p>
           </div>
           <div className="space-y-2">
@@ -309,6 +714,13 @@ export default function ModuleReaderApp() {
               className="w-full inline-flex items-center justify-center gap-2 px-5 py-3 text-xs font-semibold text-white bg-emerald-900 hover:bg-emerald-800 rounded-xl transition-colors shadow-xs"
             >
               <span>Login Akun Pelajar (login.html) →</span>
+            </a>
+            <a
+              href="./login.html?role=superadmin"
+              className="w-full inline-flex items-center justify-center gap-2 px-5 py-2.5 text-xs font-semibold text-amber-950 bg-amber-100 hover:bg-amber-200 rounded-xl transition-colors"
+            >
+              <ShieldCheck className="w-3.5 h-3.5 text-amber-800" />
+              <span>Login Superadmin (mazharhajid@gmail.com) →</span>
             </a>
             <a
               href="./index.html"
@@ -323,7 +735,7 @@ export default function ModuleReaderApp() {
   }
 
   const prevPekan = selectedPekan > 1 ? selectedPekan - 1 : null;
-  const nextPekan = selectedPekan < 12 ? selectedPekan + 1 : null;
+  const nextPekan = selectedPekan < allPekanList.length ? selectedPekan + 1 : null;
 
   return (
     <div className="min-h-screen bg-[#F8FAFC] text-slate-900 flex flex-col font-sans">
@@ -449,7 +861,7 @@ export default function ModuleReaderApp() {
             </span>
           </div>
 
-          {/* Pekan Switcher Tabs (Pekan 1 sampai Pekan 12) */}
+          {/* Pekan Switcher Tabs (dinamis sesuai total pekan per level: 22 Pekan untuk Level 1, 16 Pekan untuk Level 2–4) */}
           <div className="pt-2 border-t border-slate-100">
             <div className="flex items-center gap-2 overflow-x-auto pb-1.5 text-xs">
               <span className="text-[11px] font-mono uppercase tracking-wider text-slate-500 font-semibold shrink-0">
@@ -458,23 +870,32 @@ export default function ModuleReaderApp() {
               {allPekanList.map((item) => {
                 const isCurrent = item.pekanNumber === selectedPekan;
                 const isCompleted =
-                  studentAccount?.completedModuleKeys.includes(
+                  Array.isArray(studentAccount?.completedModuleKeys) &&
+                  studentAccount.completedModuleKeys.includes(
                     `${activeProgram.id}-pekan-${item.pekanNumber}`
                   );
+                const unlocked = isPekanUnlocked(activeProgram.id, item.pekanNumber, activeScheduleId);
                 return (
                   <button
                     key={item.pekanNumber}
                     type="button"
                     onClick={() => handleSelectPekan(activeProgram.id, item.pekanNumber)}
-                    className={`shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border font-semibold transition-all ${
+                    className={`shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border font-semibold transition-all cursor-pointer ${
                       isCurrent
                         ? 'bg-emerald-900 text-white border-emerald-900 shadow-xs'
                         : isCompleted
                           ? 'bg-emerald-50 text-emerald-900 border-emerald-300 hover:bg-emerald-100'
-                          : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'
+                          : !unlocked && !isSuperAdmin
+                            ? 'bg-slate-100/80 text-slate-400 border-slate-200 hover:bg-slate-200/60'
+                            : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'
                     }`}
                   >
                     <span>Pekan {item.pekanNumber}</span>
+                    {!unlocked && (
+                      <span className="text-[10px]" title="Pekan ini belum dibuka oleh Superadmin/Asatidz">
+                        🔒
+                      </span>
+                    )}
                     {item.pekanNumber === 1 && (
                       <span className="text-[10px] font-mono px-1 rounded bg-emerald-800 text-emerald-100">
                         Muqaddimah
@@ -491,7 +912,99 @@ export default function ModuleReaderApp() {
 
       {/* Main Container: ONLY displays content related to selectedPekan */}
       <main className="flex-1 max-w-[1240px] w-full mx-auto px-6 py-8 space-y-8">
-        {/* Focused Hero Banner for Selected Pekan */}
+        {/* Banner Status Akses Pekan Khusus Superadmin */}
+        {isSuperAdmin && (
+          <div className={`p-4 rounded-xl border flex flex-col sm:flex-row items-center justify-between gap-3 text-xs ${
+            !isCurrentPekanOpen
+              ? 'bg-amber-50 border-amber-300 text-amber-950 shadow-xs'
+              : 'bg-emerald-50/70 border-emerald-200 text-emerald-950'
+          }`}>
+            <div className="flex items-center gap-2.5">
+              <div className={`p-2 rounded-lg shrink-0 ${!isCurrentPekanOpen ? 'bg-amber-200 text-amber-900' : 'bg-emerald-200 text-emerald-900'}`}>
+                {!isCurrentPekanOpen ? <Lock className="w-4 h-4" /> : <Unlock className="w-4 h-4" />}
+              </div>
+              <div>
+                <p className="font-bold font-mono uppercase tracking-wide">
+                  {!isCurrentPekanOpen ? `Status Akses Santri: Pekan ${selectedPekan} TERKUNCI 🔒` : `Status Akses Santri: Pekan ${selectedPekan} TERBUKA 🔓`}
+                </p>
+                <p className="text-[11px] opacity-80 mt-0.5">
+                  {!isCurrentPekanOpen
+                    ? 'Santri tidak dapat membuka materi pekan ini sebelum Anda membukanya. Anda sedang melihat pratinjau sebagai Superadmin.'
+                    : 'Semua santri yang terdaftar dapat membaca materi dan mengerjakan latihan pekan ini.'}
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              {!isCurrentPekanOpen ? (
+                <button
+                  type="button"
+                  onClick={async () => {
+                    await savePekanUnlockState(activeProgram.id, selectedPekan, true, activeScheduleId);
+                    setMateriVersion((v) => v + 1);
+                    showToast(`Akses Pekan ${selectedPekan} (${activeSchedule?.batchCode || activeProgram.code}) berhasil DIBUKA (ON) untuk santri!`);
+                  }}
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold text-white bg-emerald-900 hover:bg-emerald-800 rounded-lg shadow-xs cursor-pointer"
+                >
+                  <Unlock className="w-3.5 h-3.5" />
+                  <span>Buka Akses Pekan {selectedPekan}</span>
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={async () => {
+                    await savePekanUnlockState(activeProgram.id, selectedPekan, false, activeScheduleId);
+                    setMateriVersion((v) => v + 1);
+                    showToast(`Akses Pekan ${selectedPekan} (${activeSchedule?.batchCode || activeProgram.code}) telah DIKUNCI (OFF) kembali.`);
+                  }}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-rose-800 bg-white hover:bg-rose-50 border border-rose-300 rounded-lg cursor-pointer"
+                >
+                  <Lock className="w-3.5 h-3.5" />
+                  <span>Kunci Pekan {selectedPekan}</span>
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Tampilan Terkunci Jika Santri Mencoba Membuka Pekan yang Belum Dibuka */}
+        {!isCurrentPekanOpen && !isSuperAdmin ? (
+          <section className="bg-white rounded-2xl border border-amber-200 p-8 sm:p-12 text-center max-w-2xl mx-auto space-y-6 shadow-sm my-8">
+            <div className="w-16 h-16 rounded-2xl bg-amber-50 border border-amber-200 text-amber-700 flex items-center justify-center mx-auto shadow-xs">
+              <Lock className="w-8 h-8" />
+            </div>
+            <div className="space-y-2">
+              <span className="px-3 py-1 rounded-full text-xs font-mono font-bold bg-amber-100 text-amber-900 border border-amber-300 inline-block">
+                Pekan {selectedPekan} Terkunci
+              </span>
+              <h2 className="text-xl sm:text-2xl font-bold font-display text-slate-900">
+                Materi Pekan ke-{selectedPekan} Belum Dibuka
+              </h2>
+              <p className="text-xs sm:text-sm text-slate-600 max-w-lg mx-auto leading-relaxed">
+                Afwan, materi pembelajaran, rekaman video, kaidah, dan latihan untuk <strong>Pekan ke-{selectedPekan} ({activeProgram.code} — {activeProgram.title})</strong> belum dibuka oleh Superadmin/Asatidz.
+                <br /><br />
+                Materi dibuka secara bertahap setiap pekannya sesuai dengan jadwal perkuliahan berjalan.
+              </p>
+            </div>
+
+            <div className="pt-2 flex flex-col sm:flex-row items-center justify-center gap-3">
+              <button
+                type="button"
+                onClick={() => handleSelectPekan(activeProgram.id, 1)}
+                className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-5 py-2.5 text-xs font-semibold text-white bg-emerald-900 hover:bg-emerald-800 rounded-xl transition-colors shadow-xs"
+              >
+                <span>← Buka Materi Pekan 1 (Muqaddimah)</span>
+              </button>
+              <a
+                href="./pelajar.html"
+                className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-5 py-2.5 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-xl transition-colors"
+              >
+                <span>Ke Portal Pelajar (pelajar.html) →</span>
+              </a>
+            </div>
+          </section>
+        ) : (
+          <>
+            {/* Focused Hero Banner for Selected Pekan */}
         <section className="bg-slate-900 text-white rounded-2xl border border-slate-800 p-6 sm:p-8 relative overflow-hidden shadow-sm">
           <div className="relative z-10 space-y-4">
             <div className="flex flex-wrap items-center gap-2.5 text-xs font-mono text-emerald-400">
@@ -546,21 +1059,48 @@ export default function ModuleReaderApp() {
               onClick={() => setActiveTab('video')}
               className={`flex-1 min-w-[210px] inline-flex items-center justify-center gap-2 px-4 py-2.5 text-xs font-bold rounded-lg transition-all cursor-pointer ${
                 activeTab === 'video'
-                  ? 'bg-rose-600 text-white shadow-sm ring-2 ring-rose-400'
-                  : 'bg-rose-50 text-rose-700 hover:bg-rose-100 border border-rose-200'
+                  ? 'bg-emerald-900 text-white shadow-sm ring-2 ring-emerald-400'
+                  : 'bg-emerald-50 text-emerald-900 hover:bg-emerald-100 border border-emerald-200'
               }`}
               title="Simak penjelasan video materi pekan ini langsung dari YouTube"
             >
-              <Youtube className="w-4 h-4 text-rose-500 fill-current" />
+              <Video className="w-4 h-4 shrink-0" />
               <span>Simak Video Materi (YouTube)</span>
               <span
                 className={`text-[10px] font-mono px-1.5 py-0.5 rounded font-bold ${
-                  activeTab === 'video' ? 'bg-rose-700 text-white' : 'bg-rose-200 text-rose-900'
+                  activeTab === 'video' ? 'bg-emerald-700 text-white' : 'bg-emerald-200 text-emerald-950'
                 }`}
               >
-                ▶ HD
+                {hasPlayableVideo ? '▶ HD' : 'Belum Ada'}
               </span>
             </button>
+
+            {(activeProgram.id === 'tl-level-1' || getNormalizedPekanAudioItems(pekanData).length > 0) && (
+              <button
+                type="button"
+                onClick={() => setActiveTab('audio')}
+                className={`flex-1 min-w-[210px] inline-flex items-center justify-center gap-2 px-4 py-2.5 text-xs font-bold rounded-lg transition-all cursor-pointer ${
+                  activeTab === 'audio'
+                    ? 'bg-emerald-900 text-white shadow-sm ring-2 ring-emerald-400'
+                    : 'bg-emerald-50 text-emerald-900 hover:bg-emerald-100 border border-emerald-200'
+                }`}
+                title="Simak audio pelajaran mendengar (Istima') dari Google Drive"
+              >
+                <Headphones className="w-4 h-4 shrink-0" />
+                <span>Audio Istima&apos; (Google Drive)</span>
+                {getNormalizedPekanAudioItems(pekanData).length > 0 && (
+                  <span
+                    className={`text-[10px] font-mono px-1.5 py-0.5 rounded font-bold ${
+                      activeTab === 'audio'
+                        ? 'bg-amber-400 text-slate-950'
+                        : 'bg-emerald-200 text-emerald-950'
+                    }`}
+                  >
+                    {getNormalizedPekanAudioItems(pekanData).length}
+                  </span>
+                )}
+              </button>
+            )}
 
             {[
               { id: 'silabus', label: `Uraian Materi Pekan ${pekanData.pekanNumber}`, icon: BookOpen },
@@ -588,40 +1128,99 @@ export default function ModuleReaderApp() {
               );
             })}
 
-            {/* Tombol Cepat Buka di YouTube */}
-            <a
-              href={`https://www.youtube.com/watch?v=${effectiveVideoId}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-rose-700 bg-white hover:bg-rose-50 border border-rose-200 rounded-lg transition-colors shrink-0"
-              title="Buka langsung video materi di tab baru YouTube"
-            >
-              <ExternalLink className="w-3.5 h-3.5 text-rose-600" />
-              <span className="hidden xl:inline">Buka di YouTube ↗</span>
-            </a>
+            {/* Tombol Cepat Tonton di YouTube */}
+            {hasPlayableVideo && (
+              <a
+                href={youtubeWatchUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-emerald-800 bg-white hover:bg-emerald-50 border border-emerald-200 rounded-lg transition-colors shrink-0"
+                title="Buka langsung video materi di YouTube"
+              >
+                <ExternalLink className="w-3.5 h-3.5 text-emerald-700" />
+                <span className="hidden xl:inline">Tonton di YouTube ↗</span>
+              </a>
+            )}
 
-            {/* Tombol Khusus: Edit Materi & Video oleh Superadmin */}
-            <a
-              href={`./superadmin.html?tab=materi&program=${encodeURIComponent(activeProgram.id)}&pekan=${selectedPekan}`}
-              className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-amber-950 bg-amber-100 hover:bg-amber-200 border border-amber-300 rounded-lg transition-colors shrink-0 shadow-2xs"
-              title="Edit materi dan video YouTube ini di Halaman Superadmin (superadmin.html)"
-            >
-              <ShieldCheck className="w-3.5 h-3.5 text-amber-800" />
-              <span>Edit di Superadmin ⚙</span>
-            </a>
+            {/* Tombol Khusus: HANYA TAMPIL UNTUK SUPERADMIN */}
+            {isSuperAdmin && (
+              <>
+                <a
+                  href={`./superadmin.html?tab=materi&program=${encodeURIComponent(activeProgram.id)}&pekan=${selectedPekan}`}
+                  className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-amber-950 bg-amber-100 hover:bg-amber-200 border border-amber-300 rounded-lg transition-colors shrink-0 shadow-2xs"
+                  title="Edit materi dan video YouTube ini di Halaman Superadmin (superadmin.html)"
+                >
+                  <ShieldCheck className="w-3.5 h-3.5 text-amber-800" />
+                  <span>Edit di Superadmin ⚙</span>
+                </a>
 
-            {/* Quick Edit Modal Trigger */}
-            <button
-              type="button"
-              onClick={handleOpenQuickEdit}
-              className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 border border-slate-300 rounded-lg transition-colors shrink-0 cursor-pointer"
-              title="Edit cepat link video YouTube materi ini"
-            >
-              <Edit3 className="w-3.5 h-3.5 text-slate-600" />
-              <span className="hidden sm:inline">Edit Cepat Video</span>
-            </button>
+                <button
+                  type="button"
+                  onClick={handleOpenQuickEdit}
+                  className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 border border-slate-300 rounded-lg transition-colors shrink-0 cursor-pointer"
+                  title="Edit cepat link video YouTube materi ini (Khusus Superadmin)"
+                >
+                  <Edit3 className="w-3.5 h-3.5 text-slate-600" />
+                  <span className="hidden sm:inline">Edit Cepat Video</span>
+                </button>
+              </>
+            )}
           </nav>
         </section>
+
+        {/* Banner Mode Superadmin jika sedang login sebagai Superadmin */}
+        {isSuperAdmin && (
+          <div className="bg-amber-50 border border-amber-300 rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs shadow-2xs">
+            <div className="flex items-center gap-2.5 text-amber-950">
+              <ShieldCheck className="w-5 h-5 text-amber-700 shrink-0" />
+              <div>
+                <p className="font-bold text-amber-900">
+                  Mode Superadmin Aktif ({SUPERADMIN_EMAIL})
+                </p>
+                <p className="text-[11px] text-amber-800">
+                  Hanya Superadmin yang memiliki hak akses untuk mengedit link video YouTube dan konten kurikulum pekan ini.
+                </p>
+              </div>
+            </div>
+            <a
+              href={`./superadmin.html?tab=materi&program=${encodeURIComponent(activeProgram.id)}&pekan=${selectedPekan}`}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-amber-900 text-white hover:bg-amber-800 rounded-lg font-semibold text-xs shrink-0 self-start sm:self-auto shadow-xs"
+            >
+              <Settings className="w-3.5 h-3.5" />
+              <span>Kelola di superadmin.html →</span>
+            </a>
+          </div>
+        )}
+
+        {/* Tab Audio: Pelajaran Mendengar (Istima') dari Google Drive */}
+        {activeTab === 'audio' && (
+          <section className="bg-white border border-slate-200 rounded-2xl p-6 sm:p-8 space-y-5 shadow-2xs">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-200 pb-4">
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-mono font-bold text-emerald-800 uppercase tracking-wider flex items-center gap-1.5">
+                    <Headphones className="w-4 h-4 text-emerald-700" />
+                    PELAJARAN MENDENGAR (ISTIMA&apos;) PEKAN {pekanData.pekanNumber}
+                  </span>
+                </div>
+                <h2 className="text-xl sm:text-2xl font-bold text-slate-900 mt-1">
+                  Audio Bahasa Arab: {pekanData.title}
+                </h2>
+                <p className="text-xs text-slate-600 mt-1">
+                  Putar rekaman audio pembelajaran (Google Drive) dengan seksama untuk melatih pendengaran Bahasa Arab Anda.
+                </p>
+              </div>
+              <span dir="rtl" className="font-arabic text-xl font-bold text-emerald-900 shrink-0">
+                دَرْسُ الاسْتِمَاعِ
+              </span>
+            </div>
+
+            <GoogleDriveAudioPlayer
+              items={getNormalizedPekanAudioItems(pekanData)}
+              pekanNumber={pekanData.pekanNumber}
+            />
+          </section>
+        )}
 
         {/* Tab Video: Video Pembelajaran Langsung dari YouTube */}
         {activeTab === 'video' && (
@@ -629,17 +1228,17 @@ export default function ModuleReaderApp() {
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-200 pb-5">
               <div>
                 <div className="flex items-center gap-2">
-                  <span className="text-xs font-mono font-bold text-rose-600 uppercase tracking-wider flex items-center gap-1.5">
-                    <Youtube className="w-4 h-4 fill-current text-rose-600" />
-                    VIDEO MATERI KHUSUS PEKAN {pekanData.pekanNumber}
+                  <span className="text-xs font-mono font-bold text-emerald-800 uppercase tracking-wider flex items-center gap-1.5">
+                    <Video className="w-4 h-4 text-emerald-700" />
+                    VIDEO MATERI YOUTUBE PEKAN {pekanData.pekanNumber}
                   </span>
                   <span className="text-slate-300">·</span>
                   <span className="text-xs font-mono text-slate-500">
-                    {pekanData.youtubeChannel || 'Tadribul Lughah Official'}
+                    {displayVideoChannel}
                   </span>
                 </div>
                 <h2 className="text-xl sm:text-2xl font-bold text-slate-900 mt-1">
-                  {pekanData.youtubeTitle || `Simak Video Materi: ${pekanData.title}`}
+                  {displayVideoTitle}
                 </h2>
                 <p className="text-xs text-slate-600 mt-1">
                   Kitab Rujukan: <strong>{pekanData.kitabReference}</strong> · Jadwal Kelas: <strong>{activeSchedule.timeWIB} ({activeSchedule.days})</strong>
@@ -647,136 +1246,122 @@ export default function ModuleReaderApp() {
               </div>
 
               <div className="flex flex-wrap items-center gap-2 shrink-0">
-                <a
-                  href={`https://www.youtube.com/watch?v=${effectiveVideoId}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-white bg-rose-600 hover:bg-rose-700 rounded-xl transition-colors shadow-xs"
-                >
-                  <ExternalLink className="w-3.5 h-3.5" />
-                  <span>Tonton di YouTube ↗</span>
-                </a>
-                <button
-                  type="button"
-                  onClick={handleOpenQuickEdit}
-                  className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-slate-800 bg-slate-100 hover:bg-slate-200 border border-slate-300 rounded-xl transition-colors cursor-pointer"
-                  title="Edit video YouTube ini"
-                >
-                  <Edit3 className="w-3.5 h-3.5" />
-                  <span>Edit Video</span>
-                </button>
-                <a
-                  href={`./superadmin.html?tab=materi&program=${encodeURIComponent(activeProgram.id)}&pekan=${selectedPekan}`}
-                  className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-amber-950 bg-amber-100 hover:bg-amber-200 border border-amber-300 rounded-xl transition-colors shadow-2xs"
-                  title="Buka panel lengkap Superadmin di superadmin.html"
-                >
-                  <ShieldCheck className="w-3.5 h-3.5 text-amber-800" />
-                  <span className="hidden sm:inline">Halaman Superadmin</span>
-                </a>
-                <button
-                  type="button"
-                  onClick={() => setShowCustomUrlInput(!showCustomUrlInput)}
-                  className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-slate-700 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-xl transition-colors cursor-pointer"
-                  title="Ganti tautan video YouTube jika ustadz memberikan link rekaman khusus"
-                >
-                  <span>{showCustomUrlInput ? 'Tutup URL' : 'Ganti URL'}</span>
-                </button>
+                {hasPlayableVideo && (
+                  <a
+                    href={youtubeWatchUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-white bg-emerald-800 hover:bg-emerald-900 rounded-xl transition-colors shadow-xs"
+                  >
+                    <ExternalLink className="w-3.5 h-3.5" />
+                    <span>Tonton di YouTube ↗</span>
+                  </a>
+                )}
+
+                {/* Tombol Edit: HANYA TAMPIL JIKA SUPERADMIN */}
+                {isSuperAdmin && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={handleOpenQuickEdit}
+                      className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-slate-800 bg-slate-100 hover:bg-slate-200 border border-slate-300 rounded-xl transition-colors cursor-pointer"
+                      title="Edit video YouTube ini (Khusus Superadmin)"
+                    >
+                      <Edit3 className="w-3.5 h-3.5" />
+                      <span>Edit Video</span>
+                    </button>
+                    <a
+                      href={`./superadmin.html?tab=materi&program=${encodeURIComponent(activeProgram.id)}&pekan=${selectedPekan}`}
+                      className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-amber-950 bg-amber-100 hover:bg-amber-200 border border-amber-300 rounded-xl transition-colors shadow-2xs"
+                      title="Buka panel lengkap Superadmin di superadmin.html"
+                    >
+                      <ShieldCheck className="w-3.5 h-3.5 text-amber-800" />
+                      <span className="hidden sm:inline">Halaman Superadmin</span>
+                    </a>
+                  </>
+                )}
               </div>
             </div>
 
-            {/* Custom URL Input if toggled */}
-            {showCustomUrlInput && (
-              <div className="p-4 bg-rose-50/70 border border-rose-200 rounded-xl space-y-2">
-                <div className="flex flex-col sm:flex-row gap-2">
-                  <input
-                    type="text"
-                    value={customYoutubeUrl}
-                    onChange={(e) => setCustomYoutubeUrl(e.target.value)}
-                    placeholder="Masukkan URL atau Video ID YouTube (contoh: https://www.youtube.com/watch?v=...)"
-                    className="flex-1 px-3.5 py-2 text-xs bg-white border border-rose-300 rounded-lg text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-rose-500"
+            {/* Embedded YouTube Player Container */}
+            {hasPlayableVideo ? (
+              <div className="w-full bg-slate-950 rounded-2xl overflow-hidden shadow-md border border-slate-800">
+                <div className="relative aspect-video w-full">
+                  <iframe
+                    key={effectiveYouTubeId}
+                    className="absolute inset-0 w-full h-full border-0"
+                    src={youtubeEmbedUrl}
+                    title={displayVideoTitle}
+                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                    allowFullScreen
                   />
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (!customYoutubeUrl) {
-                        showToast('Link video YouTube dikembalikan ke bawaan pekan.');
-                      } else {
-                        const parsed = parseYouTubeId(customYoutubeUrl);
-                        if (parsed) {
-                          showToast(`Video YouTube berhasil dimuat: ${parsed}`);
-                        } else {
-                          showToast('Format tautan YouTube belum dikenali. Menggunakan video bawaan.');
-                        }
-                      }
-                    }}
-                    className="px-4 py-2 text-xs font-semibold text-white bg-rose-600 hover:bg-rose-700 rounded-lg cursor-pointer"
-                  >
-                    Terapkan Video
-                  </button>
-                  {customYoutubeUrl && (
+                </div>
+                <div className="px-5 py-3.5 bg-slate-900 border-t border-slate-800 flex flex-wrap items-center justify-between gap-3 text-xs text-slate-300">
+                  <div className="flex items-center gap-2">
+                    <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                    <span className="font-mono text-white font-semibold">Video Pembelajaran YouTube</span>
+                    {effectiveYouTubeId && (
+                      <>
+                        <span className="text-slate-500">·</span>
+                        <span className="font-mono text-slate-400 truncate max-w-[180px]">
+                          ID: {effectiveYouTubeId}
+                        </span>
+                      </>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2">
                     <button
                       type="button"
                       onClick={() => {
-                        setCustomYoutubeUrl('');
-                        showToast('Kembali ke video bawaan kurikulum.');
+                        navigator.clipboard.writeText(youtubeWatchUrl);
+                        showToast('Tautan video YouTube berhasil disalin!');
                       }}
-                      className="px-3 py-2 text-xs font-semibold text-slate-600 bg-white hover:bg-slate-100 border border-slate-300 rounded-lg cursor-pointer"
+                      className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-mono text-slate-200 bg-slate-800 hover:bg-slate-700 rounded transition-colors cursor-pointer"
                     >
-                      Reset
+                      <Share2 className="w-3 h-3 text-slate-400" />
+                      <span>Salin Link YouTube</span>
                     </button>
-                  )}
+                    <button
+                      type="button"
+                      onClick={handleToggleComplete}
+                      className={`inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-semibold rounded transition-colors cursor-pointer ${
+                        isPekanDone
+                          ? 'bg-emerald-800/80 text-emerald-200'
+                          : 'bg-emerald-600 hover:bg-emerald-500 text-white'
+                      }`}
+                    >
+                      <CheckCircle2 className="w-3 h-3" />
+                      <span>{isPekanDone ? 'Sudah Tuntas ✓' : 'Tandai Tuntas'}</span>
+                    </button>
+                  </div>
                 </div>
-                <p className="text-[11px] text-rose-800">
-                  Fitur ini memungkinkan santri/ustadz mengganti video dengan rekaman Zoom kelas pekan ini yang diunggah ke YouTube.
-                </p>
+              </div>
+            ) : (
+              <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-8 sm:p-10 text-center space-y-3">
+                <div className="w-12 h-12 rounded-2xl bg-emerald-100 text-emerald-800 flex items-center justify-center mx-auto">
+                  <Video className="w-6 h-6" />
+                </div>
+                <div className="space-y-1 max-w-md mx-auto">
+                  <h3 className="text-sm font-bold text-slate-900">
+                    Video YouTube Pekan {pekanData.pekanNumber} Belum Diatur
+                  </h3>
+                  <p className="text-xs text-slate-600 leading-relaxed">
+                    Superadmin belum menautkan link video YouTube untuk pekan ini. Silakan pelajari{' '}
+                    <strong>Uraian Materi</strong>, <strong>Kaidah Khusus</strong>, atau hubungi Asatidz/Admin.
+                  </p>
+                </div>
+                {isSuperAdmin && (
+                  <button
+                    type="button"
+                    onClick={handleOpenQuickEdit}
+                    className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-bold text-white bg-emerald-800 hover:bg-emerald-900 rounded-xl transition-colors cursor-pointer shadow-xs"
+                  >
+                    <Edit3 className="w-3.5 h-3.5" />
+                    <span>Masukkan Link Video YouTube</span>
+                  </button>
+                )}
               </div>
             )}
-
-            {/* Embedded YouTube Player Container */}
-            <div className="w-full bg-slate-950 rounded-2xl overflow-hidden shadow-md border border-slate-800">
-              <div className="relative aspect-video w-full">
-                <iframe
-                  className="absolute inset-0 w-full h-full"
-                  src={`https://www.youtube-nocookie.com/embed/${effectiveVideoId}?autoplay=0&rel=0&modestbranding=1&playsinline=1`}
-                  title={pekanData.youtubeTitle || `Materi Pekan ${pekanData.pekanNumber}`}
-                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-                  allowFullScreen
-                />
-              </div>
-              <div className="px-5 py-3.5 bg-slate-900 border-t border-slate-800 flex flex-wrap items-center justify-between gap-3 text-xs text-slate-300">
-                <div className="flex items-center gap-2">
-                  <span className="w-2.5 h-2.5 rounded-full bg-rose-500 animate-pulse"></span>
-                  <span className="font-mono text-white font-semibold">Video Streaming YouTube (1080p HD)</span>
-                  <span className="text-slate-500">·</span>
-                  <span className="font-mono text-slate-400">ID: {effectiveVideoId}</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      navigator.clipboard.writeText(`https://www.youtube.com/watch?v=${effectiveVideoId}`);
-                      showToast('Tautan video YouTube berhasil disalin!');
-                    }}
-                    className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-mono text-slate-200 bg-slate-800 hover:bg-slate-700 rounded transition-colors cursor-pointer"
-                  >
-                    <Share2 className="w-3 h-3 text-slate-400" />
-                    <span>Salin Link</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleToggleComplete}
-                    className={`inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-semibold rounded transition-colors cursor-pointer ${
-                      isPekanDone
-                        ? 'bg-emerald-800/80 text-emerald-200'
-                        : 'bg-emerald-600 hover:bg-emerald-500 text-white'
-                    }`}
-                  >
-                    <CheckCircle2 className="w-3 h-3" />
-                    <span>{isPekanDone ? 'Sudah Tuntas ✓' : 'Tandai Tuntas'}</span>
-                  </button>
-                </div>
-              </div>
-            </div>
 
             {/* Video Study Tips & Summary */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-2">
@@ -972,93 +1557,203 @@ export default function ModuleReaderApp() {
         {/* Tab 4: Latihan & Kuis Khusus Pekan Ini */}
         {activeTab === 'kuis' && (
           <section className="bg-white border border-slate-200 rounded-2xl p-6 sm:p-8 space-y-6 shadow-2xs">
-            <div className="border-b border-slate-200 pb-4">
-              <span className="text-xs font-mono font-semibold text-emerald-900 uppercase tracking-wider">
-                BAGIAN 4 · UJI PEMAHAMAN PEKAN {pekanData.pekanNumber}
-              </span>
-              <h2 className="text-xl font-bold text-slate-900 mt-1">
-                Latihan Soal Mandiri (تَمْرِينَاتُ الأُسْبُوعِ)
-              </h2>
-              <p className="text-xs text-slate-600 mt-1">
-                Kuis mandiri untuk memastikan Anda telah menguasai materi Pekan ke-{pekanData.pekanNumber}.
-              </p>
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-200 pb-4">
+              <div>
+                <span className="text-xs font-mono font-semibold text-emerald-900 uppercase tracking-wider">
+                  BAGIAN 4 · UJI PEMAHAMAN BERBOBOT NILAI PEKAN {pekanData.pekanNumber}
+                </span>
+                <h2 className="text-xl font-bold text-slate-900 mt-1 flex items-center gap-2">
+                  <span>Latihan Soal & Kuis Mandiri</span>
+                  <span className="text-xs font-mono font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-950 border border-emerald-300">
+                    KKM {passingThreshold}
+                  </span>
+                </h2>
+                <p className="text-xs text-slate-600 mt-1">
+                  Evaluasi pemahaman kaidah pekan ini dengan sistem penilaian otomatis, bobot poin, predikat, dan pencatatan ke rapor.
+                </p>
+              </div>
+
+              {/* Action Button for SuperAdmin */}
+              {isSuperAdmin && (
+                <a
+                  href={`./superadmin.html?tab=materi&program=${encodeURIComponent(activeProgram.id)}&pekan=${selectedPekan}#section-latihan`}
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-amber-950 bg-amber-100 hover:bg-amber-200 border border-amber-300 rounded-xl transition-colors shadow-2xs shrink-0 self-start sm:self-auto"
+                  title="Buat atau edit soal latihan pekan ini di panel Superadmin (superadmin.html)"
+                >
+                  <ShieldCheck className="w-4 h-4 text-amber-800" />
+                  <span>Buat / Kelola Latihan di Superadmin ⚙</span>
+                </a>
+              )}
             </div>
 
-            {pekanData.quizzes && pekanData.quizzes.length > 0 ? (
+            {quizzes && quizzes.length > 0 ? (
               <div className="space-y-6">
-                {pekanData.quizzes.map((q) => {
-                  const selectedOpt = quizAnswers[q.id];
-                  const isSubmitted = quizSubmitted[q.id];
-                  const isCorrect = isSubmitted && selectedOpt === q.correctIndex;
-
-                  return (
-                    <div
-                      key={q.id}
-                      className="p-5 rounded-xl border border-slate-200 bg-[#FBF9F5] space-y-4"
-                    >
-                      <div className="space-y-1">
-                        <span className="text-xs font-mono font-semibold text-emerald-900">
-                          Soal #{q.id}
-                        </span>
-                        <h4 className="text-sm font-bold text-slate-900">
-                          {q.question}
-                        </h4>
-                        {q.arabicPrompt && (
-                          <p dir="rtl" className="font-arabic text-xl text-slate-950 pt-1 font-semibold">
-                            {q.arabicPrompt}
-                          </p>
-                        )}
-                      </div>
-
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                        {q.options.map((opt, optIdx) => {
-                          const isOptionSelected = selectedOpt === optIdx;
-                          return (
-                            <button
-                              key={optIdx}
-                              type="button"
-                              onClick={() => {
-                                setQuizAnswers((prev) => ({ ...prev, [q.id]: optIdx }));
-                                setQuizSubmitted((prev) => ({ ...prev, [q.id]: true }));
-                              }}
-                              className={`p-3 text-xs text-left rounded-lg border transition-all ${
-                                isSubmitted && optIdx === q.correctIndex
-                                  ? 'bg-emerald-100 text-emerald-950 border-emerald-500 font-bold'
-                                  : isSubmitted && isOptionSelected && !isCorrect
-                                    ? 'bg-rose-100 text-rose-950 border-rose-400 font-semibold'
-                                    : isOptionSelected
-                                      ? 'bg-emerald-900 text-white border-emerald-900 font-semibold'
-                                      : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'
-                              }`}
-                            >
-                              <div className="flex items-center gap-2">
-                                <span className="w-5 h-5 rounded-full border border-current text-[11px] font-mono flex items-center justify-center shrink-0">
-                                  {String.fromCharCode(65 + optIdx)}
-                                </span>
-                                <span>{opt}</span>
-                              </div>
-                            </button>
-                          );
-                        })}
-                      </div>
-
-                      {isSubmitted && (
-                        <div
-                          className={`p-3.5 rounded-lg text-xs leading-relaxed border ${
-                            isCorrect
-                              ? 'bg-emerald-50 border-emerald-300 text-emerald-950'
-                              : 'bg-rose-50 border-rose-200 text-rose-950'
-                          }`}
-                        >
-                          <strong className="block mb-1">
-                            {isCorrect ? '✓ Jawaban Anda Benar!' : '✕ Jawaban Kurang Tepat.'}
-                          </strong>
-                          <span>{q.explanation}</span>
+                {/* JIKA SUDAH DISUBMIT: TAMPILKAN STATUS TERKUNCI & NILAI RAPOR */}
+                {isExamLocked ? (
+                  <div className="bg-slate-900 text-white rounded-2xl p-6 sm:p-8 border border-slate-800 space-y-5 shadow-md">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800 pb-4">
+                      <div className="flex items-center gap-2.5">
+                        <div className="w-9 h-9 rounded-xl bg-amber-500/20 text-amber-400 border border-amber-500/30 flex items-center justify-center shrink-0">
+                          <Lock className="w-5 h-5 text-amber-400" />
                         </div>
-                      )}
+                        <div>
+                          <span className="text-[11px] font-mono uppercase tracking-wider text-amber-400 font-bold block">
+                            STATUS: SELESAI DIKERJAKAN & TERKUNCI
+                          </span>
+                          <h3 className="text-lg font-bold text-white">
+                            Rapor Resmi Latihan Pekan {pekanData.pekanNumber}
+                          </h3>
+                        </div>
+                      </div>
+
+                      <span className="text-xs font-mono px-3 py-1 rounded-full bg-slate-800 border border-slate-700 text-slate-300">
+                        1 Kali Kesempatan (Selesai)
+                      </span>
                     </div>
-                  );
-                })}
+
+                    <div className="p-4 bg-amber-500/10 border border-amber-500/20 rounded-xl text-xs text-amber-200/90 leading-relaxed">
+                      Latihan pekan ini telah Anda selesaikan{' '}
+                      {submissionDateFormatted ? `pada ${submissionDateFormatted}` : ''}
+                      . Sesuai ketentuan Ma'had, latihan ini bersifat <strong>satu kali pengerjaan</strong> dan <strong>tidak dapat diulang kembali</strong>.
+                    </div>
+
+                    {/* Nilai Rapor Mini */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 items-center bg-slate-800/80 rounded-xl p-4 border border-slate-700">
+                      <div className="flex items-center gap-3.5">
+                        <div className="w-14 h-14 rounded-xl bg-white flex items-center justify-center shrink-0">
+                          {isPassed ? (
+                            <Trophy className="w-7 h-7 text-amber-500" />
+                          ) : (
+                            <Award className="w-7 h-7 text-slate-600" />
+                          )}
+                        </div>
+                        <div>
+                          <span className="text-[10px] font-mono text-slate-400 uppercase tracking-wider block">
+                            NILAI TERSIMPAN:
+                          </span>
+                          <div className="flex items-baseline gap-1">
+                            <span className="text-3xl font-extrabold font-mono text-white">
+                              {displayScore}
+                            </span>
+                            <span className="text-xs font-mono text-slate-400">/ 100</span>
+                          </div>
+                          <span
+                            className={`inline-block px-2 py-0.5 rounded text-[10px] font-mono font-bold mt-0.5 ${
+                              isPassed ? 'bg-emerald-600 text-white' : 'bg-rose-600 text-white'
+                            }`}
+                          >
+                            {isPassed ? '✓ LULUS KKM' : '✕ BELUM KKM'}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="space-y-1 sm:border-l sm:border-slate-700 sm:pl-4">
+                        <span dir="rtl" className="font-arabic text-xl font-bold text-amber-300 block">
+                          {gradeInfo.arabic}
+                        </span>
+                        <p className="text-xs font-semibold text-slate-200">{gradeInfo.label}</p>
+                        <p className="text-[11px] text-slate-400 leading-relaxed">{gradeInfo.desc}</p>
+                      </div>
+                    </div>
+
+                    <div className="pt-1">
+                      <a
+                        href={`./latihan.html?program=${encodeURIComponent(activeProgram.id)}&pekan=${selectedPekan}${activeScheduleId ? `&schedule=${encodeURIComponent(activeScheduleId)}` : ''}`}
+                        className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition-colors shadow-xs"
+                      >
+                        <span>Buka & Tinjau Hasil Lengkap di Halaman Latihan (latihan.html) →</span>
+                      </a>
+                    </div>
+                  </div>
+                ) : (
+                  /* JIKA BELUM DISUBMIT: GERBANG UJIAN TERPISAH (LATIHAN.HTML) */
+                  <div className="bg-[#FBF9F5] border border-slate-300 rounded-2xl p-6 sm:p-8 space-y-6 shadow-xs">
+                    <div className="space-y-2">
+                      <div className="flex flex-wrap items-center gap-2 text-xs font-mono">
+                        <span className="px-2.5 py-0.5 rounded bg-slate-900 text-white font-bold">
+                          HALAMAN KHUSUS: latihan.html
+                        </span>
+                        <span className="text-slate-400">·</span>
+                        <span className="px-2 py-0.5 rounded bg-amber-100 text-amber-900 font-bold border border-amber-300">
+                          1 Kali Pengerjaan (Single Attempt)
+                        </span>
+                      </div>
+                      <h3 className="text-lg sm:text-xl font-bold text-slate-900">
+                        Ruang Latihan Mandiri Pekan {pekanData.pekanNumber}
+                      </h3>
+                      <p className="text-xs text-slate-600 leading-relaxed max-w-2xl">
+                        Ujian evaluasi pekanan ini dilaksanakan secara mandiri pada halaman web terpisah (<strong>latihan.html</strong>). Pastikan Anda telah menguasai materi sebelum memulai.
+                      </p>
+                    </div>
+
+                    {/* Ringkasan Ketentuan */}
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                      <div className="p-3.5 rounded-xl bg-white border border-slate-200">
+                        <span className="text-[10px] font-mono text-slate-500 uppercase block">Jumlah Soal</span>
+                        <span className="text-base font-extrabold font-mono text-slate-900">{totalQuestions} Butir</span>
+                        <span className="text-[11px] text-slate-500 block">Pilihan Ganda</span>
+                      </div>
+                      <div className="p-3.5 rounded-xl bg-white border border-slate-200">
+                        <span className="text-[10px] font-mono text-slate-500 uppercase block">Standar KKM</span>
+                        <span className="text-base font-extrabold font-mono text-emerald-900">{passingThreshold} / 100</span>
+                        <span className="text-[11px] text-slate-500 block">Batas Kelulusan</span>
+                      </div>
+                      <div className="p-3.5 rounded-xl bg-white border border-slate-200">
+                        <span className="text-[10px] font-mono text-slate-500 uppercase block">Ketentuan</span>
+                        <span className="text-base font-extrabold font-mono text-rose-700">1 Kali Ujian</span>
+                        <span className="text-[11px] text-slate-500 block">Tidak dapat diulang</span>
+                      </div>
+                    </div>
+
+                    {/* Alert Box Konfirmasi */}
+                    <div className="p-4 rounded-xl bg-amber-50 border border-amber-300 text-xs text-amber-900 flex items-start gap-3">
+                      <AlertTriangle className="w-5 h-5 text-amber-700 shrink-0 mt-0.5" />
+                      <div className="space-y-1">
+                        <p className="font-bold text-amber-950">
+                          Perhatian Sebelum Membuka Halaman Ujian:
+                        </p>
+                        <p className="leading-relaxed">
+                          Ketika Anda membuka halaman ujian dan menyelesaikan latihan, jawaban Anda akan langsung dikunci dan <strong>tidak dapat dikerjakan ulang</strong>. Sistem akan menanyakan konfirmasi kepastian kesiapan Anda sebelum soal dimulai.
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="pt-2 flex flex-col sm:flex-row items-center gap-3">
+                      <button
+                        type="button"
+                        onClick={() => setShowExamConfirmModal(true)}
+                        className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-6 py-3 rounded-xl bg-emerald-900 hover:bg-emerald-800 text-white text-xs font-bold shadow-md transition-all cursor-pointer"
+                      >
+                        <span>Buka Halaman Ujian (latihan.html) →</span>
+                        <ChevronRight className="w-4 h-4" />
+                      </button>
+                      <span className="text-[11px] font-mono text-slate-500">
+                        File terpisah: <code>latihan.html</code> / <code>ujian.html</code>
+                      </span>
+                    </div>
+                  </div>
+                )}
+              </div>
+            ) : isSuperAdmin ? (
+              <div className="p-8 text-center bg-amber-50/80 rounded-2xl border border-amber-300 space-y-4">
+                <div className="w-12 h-12 rounded-2xl bg-amber-100 border border-amber-300 text-amber-900 flex items-center justify-center mx-auto">
+                  <ShieldCheck className="w-6 h-6 text-amber-800" />
+                </div>
+                <div className="space-y-1">
+                  <h4 className="text-sm font-bold text-amber-950">
+                    Belum Ada Soal Latihan untuk Pekan ke-{pekanData.pekanNumber}
+                  </h4>
+                  <p className="text-xs text-amber-800 max-w-md mx-auto leading-relaxed">
+                    Sebagai Superadmin, Anda dapat membuat latihan soal mandiri baru (pilihan ganda, bobot nilai poin, teks Arab, kunci jawaban & pembahasan) untuk pekan ini di halaman panel Superadmin.
+                  </p>
+                </div>
+                <a
+                  href={`./superadmin.html?tab=materi&program=${encodeURIComponent(activeProgram.id)}&pekan=${selectedPekan}#section-latihan`}
+                  className="inline-flex items-center gap-2 px-5 py-2.5 text-xs font-semibold text-white bg-amber-900 hover:bg-amber-800 rounded-xl shadow-xs transition-colors"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>+ Buat Latihan Pekan Ini Sekarang</span>
+                </a>
               </div>
             ) : (
               <div className="p-8 text-center text-xs text-slate-500 bg-slate-50 rounded-xl border border-slate-200 space-y-2">
@@ -1152,14 +1847,32 @@ export default function ModuleReaderApp() {
             )}
           </div>
         </section>
+          </>
+        )}
       </main>
 
       {/* Footer */}
       <footer className="bg-slate-950 text-slate-400 py-8 border-t border-slate-800 text-xs mt-12">
         <div className="max-w-[1240px] mx-auto px-6 flex flex-col sm:flex-row items-center justify-between gap-4">
-          <p>
-            Halaman Terpisah Khusus Materi Pembelajaran (<span className="font-mono text-slate-200">materi.html</span>) — Tadribul Lughah
-          </p>
+          <div className="space-y-1">
+            <p>
+              Halaman Terpisah Khusus Materi Pembelajaran (<span className="font-mono text-slate-200">materi.html</span>) — Tadribul Lughah
+            </p>
+            <p className="text-[11px] text-slate-500">
+              {isSuperAdmin ? (
+                <span className="text-amber-400 font-medium">
+                  Terotentikasi sebagai Superadmin ({SUPERADMIN_EMAIL}). Hak akses edit link video aktif.
+                </span>
+              ) : (
+                <span>
+                  Video dan materi pembelajaran dikelola khusus oleh Superadmin melalui{' '}
+                  <a href="./login.html?role=superadmin" className="text-slate-400 hover:text-amber-300 underline">
+                    superadmin.html
+                  </a>
+                </span>
+              )}
+            </p>
+          </div>
           <div className="flex items-center gap-4">
             <a href="./pelajar.html" className="text-emerald-400 hover:text-emerald-300 font-medium">
               Portal Pelajar (pelajar.html)
@@ -1173,7 +1886,7 @@ export default function ModuleReaderApp() {
       </footer>
 
       {/* Quick Edit Video Modal for Superadmin */}
-      {isQuickEditOpen && (
+      {isQuickEditOpen && isSuperAdmin && (
         <div
           role="dialog"
           aria-modal="true"
@@ -1182,7 +1895,7 @@ export default function ModuleReaderApp() {
           <div className="bg-white border border-slate-200 rounded-2xl max-w-lg w-full shadow-2xl overflow-hidden animate-in fade-in zoom-in-95">
             <div className="bg-slate-900 text-white px-6 py-4 flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <Youtube className="w-5 h-5 text-rose-500 fill-current" />
+                <Video className="w-5 h-5 text-emerald-400" />
                 <div>
                   <span className="text-[10px] font-mono text-emerald-400 block uppercase font-semibold">
                     MODAL EDIT CEPAT VIDEO YOUTUBE
@@ -1204,31 +1917,55 @@ export default function ModuleReaderApp() {
             <form onSubmit={handleSaveQuickEdit} className="p-6 space-y-4">
               <div>
                 <label className="block text-xs font-semibold text-slate-800 mb-1">
-                  Tautan URL YouTube atau Video ID <span className="text-rose-600">*</span>
+                  Link Video YouTube atau Video ID <span className="text-rose-600">*</span>
                 </label>
                 <input
                   type="text"
                   required
-                  value={quickEditYoutube}
-                  onChange={(e) => setQuickEditYoutube(e.target.value)}
-                  placeholder="https://www.youtube.com/watch?v=... atau fC9zKq38_54"
-                  className="w-full px-3 py-2 text-xs font-mono bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-rose-600"
+                  value={quickEditYoutubeInput}
+                  onChange={(e) => setQuickEditYoutubeInput(e.target.value)}
+                  placeholder="https://www.youtube.com/watch?v=... atau https://youtu.be/..."
+                  className="w-full px-3 py-2 text-xs font-mono bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-emerald-700"
                 />
-                <p className="text-[11px] text-slate-500 mt-1">
-                  ID Terdeteksi: <strong className="font-mono text-rose-700">{extractYouTubeId(quickEditYoutube)}</strong>
+                <p className="text-[11px] text-slate-500 mt-1 flex items-center justify-between gap-2">
+                  <span>
+                    YouTube ID:{' '}
+                    <strong className="font-mono text-emerald-800">
+                      {extractOptionalYouTubeId(quickEditYoutubeInput) || '—'}
+                    </strong>
+                  </span>
+                  {isQuickFetchingMeta && (
+                    <span className="text-emerald-700 font-medium inline-flex items-center gap-1">
+                      <Loader2 className="w-3 h-3 animate-spin" />
+                      Mengambil judul &amp; channel...
+                    </span>
+                  )}
                 </p>
               </div>
 
-              {/* Preview */}
-              <div className="aspect-video w-full rounded-xl overflow-hidden bg-black border border-slate-800 shadow-sm">
-                <iframe
-                  className="w-full h-full"
-                  src={`https://www.youtube-nocookie.com/embed/${extractYouTubeId(quickEditYoutube)}?rel=0`}
-                  title="Pratinjau Video"
-                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                  allowFullScreen
-                />
-              </div>
+              {/* Preview YouTube */}
+              {(() => {
+                const previewYtId = extractOptionalYouTubeId(quickEditYoutubeInput);
+                return (
+                  <div className="aspect-video w-full rounded-xl overflow-hidden bg-black border border-slate-800 shadow-sm flex items-center justify-center">
+                    {previewYtId ? (
+                      <iframe
+                        key={previewYtId}
+                        className="w-full h-full border-0"
+                        src={`https://www.youtube.com/embed/${previewYtId}?rel=0`}
+                        title="Pratinjau Video YouTube"
+                        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                        allowFullScreen
+                      />
+                    ) : (
+                      <div className="text-center p-4 text-slate-400 text-xs">
+                        <Video className="w-8 h-8 mx-auto mb-1.5 text-emerald-400 opacity-70" />
+                        <p>Tempel link atau ID YouTube di atas (judul &amp; channel terisi otomatis).</p>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
 
               <div>
                 <label className="block text-xs font-semibold text-slate-800 mb-1">
@@ -1239,20 +1976,20 @@ export default function ModuleReaderApp() {
                   value={quickEditTitle}
                   onChange={(e) => setQuickEditTitle(e.target.value)}
                   placeholder="Judul Video Pembahasan"
-                  className="w-full px-3 py-2 text-xs bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-rose-600"
+                  className="w-full px-3 py-2 text-xs bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-emerald-700"
                 />
               </div>
 
               <div>
                 <label className="block text-xs font-semibold text-slate-800 mb-1">
-                  Nama Channel / Pengampu
+                  Nama Channel / Pemateri
                 </label>
                 <input
                   type="text"
                   value={quickEditChannel}
                   onChange={(e) => setQuickEditChannel(e.target.value)}
-                  placeholder="Tadribul Lughah Official"
-                  className="w-full px-3 py-2 text-xs bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-rose-600"
+                  placeholder="Nama Channel YouTube / Tadribul Lughah Official"
+                  className="w-full px-3 py-2 text-xs bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-emerald-700"
                 />
               </div>
 
@@ -1275,7 +2012,7 @@ export default function ModuleReaderApp() {
                   </button>
                   <button
                     type="submit"
-                    className="inline-flex items-center gap-1.5 px-4 py-1.5 text-xs font-semibold text-white bg-rose-600 hover:bg-rose-700 rounded-lg shadow-xs cursor-pointer"
+                    className="inline-flex items-center gap-1.5 px-4 py-1.5 text-xs font-semibold text-white bg-emerald-800 hover:bg-emerald-900 rounded-lg shadow-xs cursor-pointer"
                   >
                     <Save className="w-3.5 h-3.5" />
                     <span>Simpan Video</span>
@@ -1283,6 +2020,56 @@ export default function ModuleReaderApp() {
                 </div>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+      {/* Modal Konfirmasi Buka Halaman Ujian (Yakin Ingin Mengerjakan?) */}
+      {showExamConfirmModal && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/75 backdrop-blur-xs animate-in fade-in"
+        >
+          <div className="bg-white border border-slate-200 rounded-2xl max-w-md w-full p-6 space-y-5 shadow-2xl">
+            <div className="flex items-start gap-3.5">
+              <div className="w-11 h-11 rounded-2xl bg-amber-100 text-amber-800 border border-amber-300 flex items-center justify-center shrink-0">
+                <AlertTriangle className="w-6 h-6 text-amber-700" />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-slate-900">
+                  Apakah Anda Yakin Ingin Mengerjakan?
+                </h3>
+                <p className="text-xs text-slate-600 mt-1 leading-relaxed">
+                  Latihan Pekan ke-{pekanData.pekanNumber} di halaman <code className="font-bold text-slate-800">latihan.html</code> hanya dapat dikerjakan <strong className="text-rose-700">SATU KALI (1 KALI)</strong>. Jika sudah dikerjakan, Anda <strong className="text-rose-700">TIDAK BISA MENGERJAKAN ULANG</strong>.
+                </p>
+              </div>
+            </div>
+
+            <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-700 space-y-1">
+              <p>✓ Level: <strong>{activeProgram.title}</strong></p>
+              <p>✓ Pekan: <strong>Pekan ke-{pekanData.pekanNumber} ({totalQuestions} Butir Soal)</strong></p>
+              <p>✓ Batas KKM: <strong>{passingThreshold} / 100 Poin</strong></p>
+              <p className="text-[11px] text-amber-800 pt-0.5">
+                Pastikan koneksi internet stabil dan Anda telah memahami kaidah sebelum memulai.
+              </p>
+            </div>
+
+            <div className="flex items-center justify-end gap-2.5 pt-2 border-t border-slate-200">
+              <button
+                type="button"
+                onClick={() => setShowExamConfirmModal(false)}
+                className="px-4 py-2 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors cursor-pointer"
+              >
+                Batal / Pelajari Lagi
+              </button>
+
+              <a
+                href={`./latihan.html?program=${encodeURIComponent(activeProgram.id)}&pekan=${selectedPekan}${activeScheduleId ? `&schedule=${encodeURIComponent(activeScheduleId)}` : ''}`}
+                className="px-5 py-2 text-xs font-bold text-white bg-emerald-900 hover:bg-emerald-800 rounded-lg shadow-xs transition-colors"
+              >
+                ✓ Ya, Saya Yakin Mulai Mengerjakan
+              </a>
+            </div>
           </div>
         </div>
       )}

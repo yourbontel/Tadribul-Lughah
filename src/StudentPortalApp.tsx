@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   PROGRAM_TRACKS,
   CLASS_SCHEDULES,
@@ -6,7 +6,18 @@ import {
   ClassSchedule,
   RegistrationRecord,
   formatIDR,
-  applyRegistrationOpenOverrides
+  formatWhatsAppNumber,
+  applyRegistrationOpenOverrides,
+  applyScheduleStartDateOverrides,
+  syncProgramStatesFromServer,
+  ProgramOnlineMeeting,
+  buildProgramMeetings,
+  getModulePekanNumber,
+  isScheduleRegistrationOpen,
+  isProgramHasAnyOpenSchedule,
+  getPreferredScheduleForProgram,
+  findExistingBatchEnrollment,
+  getNextAvailableOpenScheduleForProgram
 } from './data/arabicAcademyData';
 import {
   StudentAccount,
@@ -16,8 +27,32 @@ import {
   saveStudentAccount,
   loadMergedRegistrations,
   getStudentRegistrations,
-  enrollStudentInProgram
+  enrollStudentInProgram,
+  isPekanExamAlreadySubmitted,
+  syncQuizScoresFromServer,
+  syncStudentAccountsFromServer,
+  syncRegistrationsFromServer,
+  AttendanceEntry,
+  AttendanceStatus,
+  getStudentAttendanceRecords,
+  saveStudentAttendanceEntry,
+  syncAttendanceFromServer,
+  isAttendanceSessionUnlocked,
+  syncAttendanceUnlockFromServer
 } from './utils/studentAccountStore';
+import {
+  isPekanUnlocked,
+  syncPekanUnlockFromServer,
+  getWeeklyPekanContent,
+  getNormalizedPekanAudioItems,
+  syncCustomMateriFromServer
+} from './data/moduleContentData';
+import { GoogleDriveAudioPlayer } from './components/GoogleDriveAudioPlayer';
+import { ScheduleClassSelector } from './components/ScheduleClassSelector';
+import {
+  EnrollmentConfirmModal,
+  PendingEnrollmentConfirmation
+} from './components/EnrollmentConfirmModal';
 import {
   db,
   auth,
@@ -36,9 +71,12 @@ import {
 import {
   BookOpen,
   Calendar,
+  CalendarCheck,
+  CalendarClock,
   CheckCircle2,
   Clock,
   Download,
+  Filter,
   GraduationCap,
   KeyRound,
   Lock,
@@ -50,28 +88,70 @@ import {
   ArrowRight,
   Sparkles,
   X,
+  Menu,
   FileText,
-  Eye
+  Eye,
+  CreditCard,
+  Wallet,
+  Receipt,
+  Copy,
+  Check,
+  AlertCircle,
+  ExternalLink,
+  MessageCircle,
+  RotateCcw,
+  Headphones
 } from 'lucide-react';
 
-type PortalTab = 'dashboard' | 'modul' | 'akun';
+type PortalTab = 'dashboard' | 'absensi' | 'modul' | 'pembayaran' | 'akun';
 
 export default function StudentPortalApp() {
-  const [activeTab, setActiveTab] = useState<PortalTab>('dashboard');
+  const [activeTab, setActiveTab] = useState<PortalTab>(() => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      const tabParam = params.get('tab');
+      if (tabParam === 'absensi' || tabParam === 'modul' || tabParam === 'pembayaran' || tabParam === 'akun') {
+        return tabParam;
+      }
+    }
+    return 'dashboard';
+  });
   const [authChecking, setAuthChecking] = useState<boolean>(true);
+  const [toastMsg, setToastMsg] = useState<string | null>(null);
+  const [mobileNavOpen, setMobileNavOpen] = useState<boolean>(false);
   const [programs, setPrograms] = useState<ProgramTrack[]>(() =>
     applyRegistrationOpenOverrides(PROGRAM_TRACKS)
   );
-  const [schedules, setSchedules] = useState<ClassSchedule[]>(CLASS_SCHEDULES);
+  const [schedules, setSchedules] = useState<ClassSchedule[]>(() =>
+    applyScheduleStartDateOverrides(CLASS_SCHEDULES)
+  );
   const [registrations, setRegistrations] = useState<RegistrationRecord[]>(() =>
     loadMergedRegistrations()
   );
 
-  const [studentAccount, setStudentAccount] = useState<StudentAccount | null>(
-    null
-  );
+  const [studentAccount, setStudentAccount] = useState<StudentAccount | null>(() => {
+    const session = getActiveStudentSession();
+    if (!session) return null;
+    const accounts = getStudentAccounts();
+    return (
+      accounts.find(
+        (a) =>
+          a.registrationNumber.toUpperCase() === session.registrationNumber.toUpperCase() ||
+          a.email.toLowerCase() === session.email.toLowerCase()
+      ) || null
+    );
+  });
   const [studentRegistration, setStudentRegistration] =
-    useState<RegistrationRecord | null>(null);
+    useState<RegistrationRecord | null>(() => {
+      const session = getActiveStudentSession();
+      if (!session) return null;
+      const allRegs = loadMergedRegistrations();
+      const studentRegs = getStudentRegistrations(
+        session.email || session.registrationNumber,
+        allRegs
+      );
+      return studentRegs[0] || null;
+    });
 
   // Password Update Form State
   const [newPassword, setNewPassword] = useState<string>('');
@@ -83,8 +163,27 @@ export default function StudentPortalApp() {
 
   // Level Switch / Upgrade State
   const [upgradeBanner, setUpgradeBanner] = useState<string | null>(null);
+  const [upgradeErrorBanner, setUpgradeErrorBanner] = useState<string | null>(null);
+  const enrollingRef = useRef<boolean>(false);
+  const [pendingLevelId, setPendingLevelId] = useState<string>('tl-level-1');
+  const [pendingScheduleId, setPendingScheduleId] = useState<string>('');
+  const [pendingLearningGoal, setPendingLearningGoal] = useState<string>('');
+  const [pendingEnrollVerify, setPendingEnrollVerify] = useState<
+    (PendingEnrollmentConfirmation & { mode: 'direct' | 'additional' }) | null
+  >(null);
+  const [isConfirmingEnrollModal, setIsConfirmingEnrollModal] = useState<boolean>(false);
   const [activeEnrolledProgramId, setActiveEnrolledProgramId] = useState<string>('');
+  const [activeRegistrationNumber, setActiveRegistrationNumber] = useState<string>('');
   const [openedModuleIndex, setOpenedModuleIndex] = useState<number | null>(null);
+  const [copiedMeetingLink, setCopiedMeetingLink] = useState<boolean>(false);
+
+  const handleCopyMeetingLink = (url: string) => {
+    if (!url) return;
+    navigator.clipboard.writeText(url).then(() => {
+      setCopiedMeetingLink(true);
+      setTimeout(() => setCopiedMeetingLink(false), 2500);
+    }).catch(() => {});
+  };
 
   const enrolledRegistrations = studentAccount
     ? getStudentRegistrations(studentAccount.email, registrations)
@@ -92,12 +191,106 @@ export default function StudentPortalApp() {
       ? [studentRegistration]
       : [];
 
-  // Set initial activeEnrolledProgramId
+  // Set initial activeEnrolledProgramId and activeRegistrationNumber
   useEffect(() => {
-    if (!activeEnrolledProgramId && enrolledRegistrations.length > 0) {
+    if (!activeRegistrationNumber && enrolledRegistrations.length > 0) {
+      setActiveRegistrationNumber(enrolledRegistrations[0].registrationNumber);
       setActiveEnrolledProgramId(enrolledRegistrations[0].selectedProgramId);
     }
-  }, [enrolledRegistrations, activeEnrolledProgramId]);
+  }, [enrolledRegistrations, activeRegistrationNumber]);
+
+  const handleSelectRegistration = (reg: RegistrationRecord) => {
+    setActiveRegistrationNumber(reg.registrationNumber);
+    setActiveEnrolledProgramId(reg.selectedProgramId);
+    setStudentRegistration(reg);
+  };
+
+  const [pekanUnlockVersion, setPekanUnlockVersion] = useState<number>(0);
+  const [materiVersion, setMateriVersion] = useState<number>(0);
+  const [selectedAudioPekan, setSelectedAudioPekan] = useState<number>(1);
+
+  useEffect(() => {
+    syncPekanUnlockFromServer().catch(() => {});
+    syncCustomMateriFromServer().catch(() => {});
+    const handlePekanUnlockUpdated = () => {
+      setPekanUnlockVersion((v) => v + 1);
+    };
+    const handleMateriUpdated = () => {
+      setMateriVersion((v) => v + 1);
+    };
+    window.addEventListener('pekan-unlock-updated', handlePekanUnlockUpdated);
+    window.addEventListener('materi-updated', handleMateriUpdated);
+    window.addEventListener('storage', handlePekanUnlockUpdated);
+    window.addEventListener('storage', handleMateriUpdated);
+    return () => {
+      window.removeEventListener('pekan-unlock-updated', handlePekanUnlockUpdated);
+      window.removeEventListener('materi-updated', handleMateriUpdated);
+      window.removeEventListener('storage', handlePekanUnlockUpdated);
+      window.removeEventListener('storage', handleMateriUpdated);
+    };
+  }, []);
+
+  // Attendance State & Sync
+  const [attendanceVersion, setAttendanceVersion] = useState<number>(0);
+  const [attendanceUnlockVersion, setAttendanceUnlockVersion] = useState<number>(0);
+  const [selectedSessionForAbsen, setSelectedSessionForAbsen] = useState<number>(1);
+  const [absenStatus, setAbsenStatus] = useState<AttendanceStatus>('hadir');
+  const [absenNotes, setAbsenNotes] = useState<string>('');
+  const [absenSuccessMsg, setAbsenSuccessMsg] = useState<string | null>(null);
+  const [attendanceFilter, setAttendanceFilter] = useState<'semua' | 'hadir' | 'izin-sakit' | 'belum'>('semua');
+  const [isAttendanceModalOpen, setIsAttendanceModalOpen] = useState<boolean>(false);
+  const [attendanceTargetSession, setAttendanceTargetSession] = useState<number | null>(null);
+  const [modalAbsenStatus, setModalAbsenStatus] = useState<AttendanceStatus>('hadir');
+  const [modalAbsenNotes, setModalAbsenNotes] = useState<string>('');
+
+  useEffect(() => {
+    syncAttendanceFromServer().catch(() => {});
+    syncAttendanceUnlockFromServer().catch(() => {});
+    const handleAttendanceUpdated = () => {
+      setAttendanceVersion((v) => v + 1);
+    };
+    const handleAttendanceUnlockUpdated = () => {
+      setAttendanceUnlockVersion((v) => v + 1);
+    };
+    window.addEventListener('attendance-updated', handleAttendanceUpdated);
+    window.addEventListener('attendance-unlock-updated', handleAttendanceUnlockUpdated);
+    window.addEventListener('storage', handleAttendanceUpdated);
+    window.addEventListener('storage', handleAttendanceUnlockUpdated);
+    return () => {
+      window.removeEventListener('attendance-updated', handleAttendanceUpdated);
+      window.removeEventListener('attendance-unlock-updated', handleAttendanceUnlockUpdated);
+      window.removeEventListener('storage', handleAttendanceUpdated);
+      window.removeEventListener('storage', handleAttendanceUnlockUpdated);
+    };
+  }, []);
+
+  // Sync program open/closed states from cPanel server across all devices
+  useEffect(() => {
+    const sync = () => {
+      syncProgramStatesFromServer().catch(() => {});
+    };
+    sync();
+
+    const reloadOverrides = () => {
+      setPrograms((prev) => applyRegistrationOpenOverrides(prev));
+      setSchedules((prev) => applyScheduleStartDateOverrides(prev));
+    };
+
+    window.addEventListener('program-open-updated', reloadOverrides);
+    window.addEventListener('storage', reloadOverrides);
+    window.addEventListener('focus', sync);
+    document.addEventListener('visibilitychange', sync);
+
+    const interval = setInterval(sync, 6000);
+
+    return () => {
+      window.removeEventListener('program-open-updated', reloadOverrides);
+      window.removeEventListener('storage', reloadOverrides);
+      window.removeEventListener('focus', sync);
+      document.removeEventListener('visibilitychange', sync);
+      clearInterval(interval);
+    };
+  }, []);
 
   // Listen to live Firestore programs, schedules, and registrationStatuses
   useEffect(() => {
@@ -125,7 +318,7 @@ export default function StudentPortalApp() {
               firestoreDocToSchedule(d.data() as Record<string, unknown>)
             )
             .sort((a, b) => a.levelNumber - b.levelNumber);
-          setSchedules(loaded);
+          setSchedules(applyScheduleStartDateOverrides(loaded));
         }
       },
       () => {}
@@ -153,33 +346,74 @@ export default function StudentPortalApp() {
 
   // Verify Student Account Session & Registration
   useEffect(() => {
-    const verifyAccess = () => {
-      const allRegs = loadMergedRegistrations(registrations);
-      const allAccounts = getStudentAccounts();
-      const session = getActiveStudentSession();
+    syncStudentAccountsFromServer().catch(() => {});
+    syncRegistrationsFromServer().catch(() => {});
 
-      if (session) {
-        const foundAcc = allAccounts.find(
+    const session = getActiveStudentSession();
+    if (session) {
+      syncQuizScoresFromServer(session.email || session.registrationNumber).then(() => {
+        const freshAccounts = getStudentAccounts();
+        const found = freshAccounts.find(
           (a) =>
             a.registrationNumber.toUpperCase() ===
               session.registrationNumber.toUpperCase() ||
             a.email.toLowerCase() === session.email.toLowerCase()
         );
+        if (found) {
+          setStudentAccount(found);
+        }
+      }).catch(() => {});
+    }
+
+    const verifyAccess = () => {
+      const allRegs = loadMergedRegistrations(registrations);
+      const allAccounts = getStudentAccounts();
+      const currentSession = getActiveStudentSession();
+
+      if (currentSession) {
+        const foundAcc = allAccounts.find(
+          (a) =>
+            a.registrationNumber.toUpperCase() ===
+              currentSession.registrationNumber.toUpperCase() ||
+            a.email.toLowerCase() === currentSession.email.toLowerCase() ||
+            (a.enrolledRegistrationNumbers &&
+              a.enrolledRegistrationNumbers.some(
+                (rn) => rn.toUpperCase() === currentSession.registrationNumber.toUpperCase()
+              ))
+        );
         const foundReg = allRegs.find(
           (r) =>
             r.registrationNumber.toUpperCase() ===
-            session.registrationNumber.toUpperCase()
+              currentSession.registrationNumber.toUpperCase() ||
+            (foundAcc &&
+              r.registrationNumber.toUpperCase() ===
+                foundAcc.registrationNumber.toUpperCase()) ||
+            (foundAcc &&
+              r.email &&
+              r.email.toLowerCase() === foundAcc.email.toLowerCase())
         );
 
-        if (foundAcc && foundReg) {
+        const studentRegs = foundAcc ? getStudentRegistrations(foundAcc.email, allRegs) : [];
+        const resolvedReg = foundReg || (studentRegs.length > 0 ? studentRegs[0] : null);
+
+        if (foundAcc) {
           setStudentAccount(foundAcc);
-          setStudentRegistration({
-            ...foundReg,
-            email: foundAcc.email || foundReg.email,
-            whatsapp: foundAcc.whatsapp || foundReg.whatsapp
-          });
+          if (resolvedReg) {
+            setStudentRegistration({
+              ...resolvedReg,
+              email: foundAcc.email || resolvedReg.email,
+              whatsapp: foundAcc.whatsapp || resolvedReg.whatsapp
+            });
+          } else {
+            setStudentRegistration(null);
+          }
           setAuthChecking(false);
           return true;
+        } else {
+          // Sesi santri sudah tidak berlaku karena akun telah dihapus Superadmin
+          clearActiveStudentSession();
+          setStudentAccount(null);
+          setStudentRegistration(null);
         }
       }
       return false;
@@ -206,12 +440,19 @@ export default function StudentPortalApp() {
                 foundAcc.registrationNumber.toUpperCase())
         );
 
-        if (foundAcc && foundReg) {
+        const studentRegs = foundAcc ? getStudentRegistrations(foundAcc.email, allRegs) : [];
+        const resolvedReg = foundReg || (studentRegs.length > 0 ? studentRegs[0] : null);
+
+        if (foundAcc) {
           setStudentAccount(foundAcc);
-          setStudentRegistration({
-            ...foundReg,
-            email: foundAcc.email
-          });
+          if (resolvedReg) {
+            setStudentRegistration({
+              ...resolvedReg,
+              email: foundAcc.email
+            });
+          } else {
+            setStudentRegistration(null);
+          }
           setAuthChecking(false);
           return;
         }
@@ -222,15 +463,56 @@ export default function StudentPortalApp() {
     return () => unsubAuth();
   }, [registrations]);
 
-  // Automatic redirect to login.html?role=pelajar if not authenticated with a valid registered student account
+  // Automatic redirect to login.html?role=pelajar ONLY if user is not authenticated at all
   useEffect(() => {
-    if (!authChecking && (!studentAccount || !studentRegistration)) {
+    if (!authChecking && !studentAccount) {
       const timer = setTimeout(() => {
-        window.location.replace('./login.html?role=pelajar');
+        const currentSearch = typeof window !== 'undefined' ? window.location.search : '';
+        const redirectParam = currentSearch ? `&redirect=${encodeURIComponent('pelajar.html' + currentSearch)}` : '';
+        window.location.replace(`./login.html?role=pelajar${redirectParam}`);
       }, 600);
       return () => clearTimeout(timer);
     }
-  }, [authChecking, studentAccount, studentRegistration]);
+  }, [authChecking, studentAccount]);
+
+  const resolvedCurrentRegForHook =
+    (activeRegistrationNumber
+      ? enrolledRegistrations.find((r) => r.registrationNumber === activeRegistrationNumber)
+      : null) ||
+    enrolledRegistrations.find((r) => r.selectedProgramId === activeEnrolledProgramId) ||
+    enrolledRegistrations[0] ||
+    studentRegistration;
+
+  const resolvedEnrolledProgramIdForHook =
+    studentAccount && resolvedCurrentRegForHook
+      ? (programs.find((p) => p.id === resolvedCurrentRegForHook.selectedProgramId)?.id ||
+          resolvedCurrentRegForHook.selectedProgramId ||
+          programs[0]?.id ||
+          PROGRAM_TRACKS[0].id)
+      : '';
+
+  const openAttendanceModalRef = useRef<(sessionNum: number) => void>(() => {});
+
+  // Auto-switch to attendance tab & open popup modal when URL has ?tab=absensi&session=X from WhatsApp
+  useEffect(() => {
+    if (typeof window === 'undefined' || !resolvedEnrolledProgramIdForHook) return;
+    const params = new URLSearchParams(window.location.search);
+    const tabParam = params.get('tab');
+    const sessParam = parseInt(params.get('session') || params.get('sesi') || '', 10);
+
+    if (tabParam === 'absensi') {
+      setActiveTab('absensi');
+      if (!isNaN(sessParam) && sessParam > 0) {
+        setSelectedSessionForAbsen(sessParam);
+        const timer = setTimeout(() => {
+          if (isAttendanceSessionUnlocked(resolvedEnrolledProgramIdForHook, sessParam)) {
+            openAttendanceModalRef.current(sessParam);
+          }
+        }, 500);
+        return () => clearTimeout(timer);
+      }
+    }
+  }, [resolvedEnrolledProgramIdForHook, attendanceUnlockVersion]);
 
   const handleLogoutStudent = async () => {
     clearActiveStudentSession();
@@ -242,8 +524,235 @@ export default function StudentPortalApp() {
     window.location.replace('./login.html?role=pelajar');
   };
 
-  // Strict Access Lock Screen if user is not logged in with a Registered Student Account
-  if (!studentAccount || !studentRegistration) {
+  const handleEnrollLevelDirectly = async (
+    programToEnroll: ProgramTrack,
+    explicitSchedule?: ClassSchedule,
+    customGoal?: string
+  ) => {
+    if (!studentAccount || enrollingRef.current) return;
+    const chosenSchedule =
+      (explicitSchedule && isScheduleRegistrationOpen(explicitSchedule, programToEnroll)
+        ? explicitSchedule
+        : null) || getPreferredScheduleForProgram(programToEnroll, schedules);
+    if (!isScheduleRegistrationOpen(chosenSchedule, programToEnroll)) {
+      alert(`Mohon maaf, seluruh angkatan pada Level ${programToEnroll.levelNumber} saat ini sedang ditutup (OFF).`);
+      return;
+    }
+    const targetAngkatan = chosenSchedule.angkatan?.trim() || programToEnroll.angkatan || 'Angkatan 1';
+    const existingForStudent = getStudentRegistrations(
+      studentAccount.email,
+      loadMergedRegistrations(registrations)
+    );
+    const duplicateBatch = findExistingBatchEnrollment(
+      existingForStudent,
+      programToEnroll.id,
+      targetAngkatan,
+      schedules,
+      programs
+    );
+    if (duplicateBatch) {
+      alert(
+        `Anda sudah terdaftar pada ${programToEnroll.title} (${targetAngkatan}) dengan nomor registrasi ${duplicateBatch.registrationNumber}.`
+      );
+      return;
+    }
+    enrollingRef.current = true;
+    try {
+    const randomDigits = Math.floor(1000 + Math.random() * 9000);
+    const newRegNo = `TL-2026-${randomDigits}`;
+    const nowStr = new Intl.DateTimeFormat('id-ID', {
+      day: '2-digit',
+      month: 'long',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
+    }).format(new Date()) + ' WIB';
+
+    const newRecord: RegistrationRecord = {
+      registrationNumber: newRegNo,
+      fullName: studentAccount.fullName,
+      gender: studentAccount.gender || 'Laki-laki',
+      email: studentAccount.email,
+      whatsapp: studentAccount.whatsapp,
+      occupation: studentAccount.occupation || 'Pelajar Terdaftar',
+      city: studentAccount.city || 'Indonesia',
+      selectedProgramId: programToEnroll.id,
+      selectedProgramName: `${programToEnroll.title} (${targetAngkatan})`,
+      selectedScheduleId: chosenSchedule.id,
+      selectedScheduleSummary: `${chosenSchedule.batchCode} · ${chosenSchedule.days} (${chosenSchedule.timeWIB}) · ${targetAngkatan} · Online`,
+      learningGoal:
+        customGoal?.trim() ||
+        `Menguasai kaidah ${programToEnroll.category === 'shorof' ? 'Shorof' : 'Nahwu'} secara sistematis melalui Tadribul Lughah Level ${programToEnroll.levelNumber} (${targetAngkatan}).`,
+      totalTuitionIDR: programToEnroll.tuitionIDR,
+      registeredAt: nowStr,
+      status: 'Terverifikasi — Menunggu Orientasi'
+    };
+
+    // Attach program registration to existing student account
+    enrollStudentInProgram(studentAccount.email, programToEnroll.id, newRegNo);
+
+    // Save to registrations in localStorage
+    const existing = loadMergedRegistrations(registrations);
+    const updated = [newRecord, ...existing];
+    try {
+      localStorage.setItem('tadribul_lughah_registrations_v3', JSON.stringify(updated));
+      localStorage.setItem('tl_registrations_v1', JSON.stringify(updated));
+    } catch {}
+
+    // Async sync to cPanel server & Firestore
+    try {
+      fetch('./api.php?entity=registrations', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ [newRecord.registrationNumber]: newRecord })
+      }).catch(() => {});
+    } catch {}
+
+    try {
+      await setDoc(
+        doc(db, 'registrations', newRecord.registrationNumber),
+        registrationToPrivateFirestoreDoc(newRecord)
+      );
+      await setDoc(
+        doc(db, 'registrationStatuses', newRecord.registrationNumber),
+        registrationToPublicStatusDoc(newRecord)
+      );
+    } catch {}
+
+    // Update state to immediately render full portal
+    setRegistrations(updated);
+    setStudentRegistration(newRecord);
+    setActiveRegistrationNumber(newRegNo);
+    setActiveEnrolledProgramId(programToEnroll.id);
+    setToastMsg(`Alhamdulillah! Anda telah resmi memilih ${programToEnroll.title}. Silabus materi dan jadwal telah dibuka.`);
+    setTimeout(() => setToastMsg(null), 4000);
+    } finally {
+      enrollingRef.current = false;
+    }
+  };
+
+  const handleRequestDirectEnrollConfirm = (
+    programToEnroll: ProgramTrack,
+    explicitSchedule?: ClassSchedule,
+    customGoal?: string
+  ) => {
+    if (!studentAccount) return;
+    const chosenSchedule =
+      (explicitSchedule && isScheduleRegistrationOpen(explicitSchedule, programToEnroll)
+        ? explicitSchedule
+        : null) || getPreferredScheduleForProgram(programToEnroll, schedules);
+    if (!isScheduleRegistrationOpen(chosenSchedule, programToEnroll)) {
+      alert(
+        `Mohon maaf, seluruh angkatan pada Level ${programToEnroll.levelNumber} saat ini sedang ditutup (OFF).`
+      );
+      return;
+    }
+    const targetAngkatan = chosenSchedule.angkatan?.trim() || programToEnroll.angkatan || 'Angkatan 1';
+    const existingForStudent = getStudentRegistrations(
+      studentAccount.email,
+      loadMergedRegistrations(registrations)
+    );
+    const duplicateBatch = findExistingBatchEnrollment(
+      existingForStudent,
+      programToEnroll.id,
+      targetAngkatan,
+      schedules,
+      programs
+    );
+    if (duplicateBatch) {
+      alert(
+        `Anda sudah terdaftar pada ${programToEnroll.title} (${targetAngkatan}) dengan nomor registrasi ${duplicateBatch.registrationNumber}.`
+      );
+      return;
+    }
+    setPendingEnrollVerify({
+      mode: 'direct',
+      program: programToEnroll,
+      schedule: chosenSchedule,
+      angkatan: targetAngkatan,
+      learningGoal: customGoal,
+      isReEnrollment: false
+    });
+  };
+
+  const handleRequestAdditionalEnrollConfirm = (
+    newProgram: ProgramTrack,
+    isReEnrollment?: boolean,
+    explicitSchedule?: ClassSchedule | null
+  ) => {
+    if (!studentAccount) return;
+    setUpgradeBanner(null);
+    setUpgradeErrorBanner(null);
+    const existingForStudent = getStudentRegistrations(
+      studentAccount.email,
+      loadMergedRegistrations(registrations)
+    );
+    const matchingSchedule =
+      (explicitSchedule && isScheduleRegistrationOpen(explicitSchedule, newProgram)
+        ? explicitSchedule
+        : null) ||
+      (isReEnrollment
+        ? getNextAvailableOpenScheduleForProgram(newProgram, schedules, existingForStudent, programs)
+        : getPreferredScheduleForProgram(newProgram, schedules));
+
+    if (!matchingSchedule || !isScheduleRegistrationOpen(matchingSchedule, newProgram)) {
+      setUpgradeErrorBanner(
+        isReEnrollment
+          ? `Anda sudah terdaftar pada seluruh angkatan yang sedang dibuka untuk ${newProgram.title} (atau pendaftaran angkatan baru sedang ditutup/OFF).`
+          : `Mohon maaf, pendaftaran untuk Level ${newProgram.levelNumber} saat ini sedang ditutup (OFF).`
+      );
+      return;
+    }
+
+    const targetAngkatan = matchingSchedule.angkatan?.trim() || newProgram.angkatan || 'Angkatan 1';
+    const duplicateBatch = findExistingBatchEnrollment(
+      existingForStudent,
+      newProgram.id,
+      targetAngkatan,
+      schedules,
+      programs
+    );
+    if (duplicateBatch) {
+      setUpgradeErrorBanner(
+        `Anda sudah terdaftar di ${newProgram.title} (${targetAngkatan}) dengan nomor registrasi ${duplicateBatch.registrationNumber}. Satu akun tidak dapat mendaftar dua kali pada level dan angkatan yang sama.`
+      );
+      return;
+    }
+
+    setPendingEnrollVerify({
+      mode: 'additional',
+      program: newProgram,
+      schedule: matchingSchedule,
+      angkatan: targetAngkatan,
+      isReEnrollment: Boolean(isReEnrollment)
+    });
+  };
+
+  const handleExecuteVerifiedEnrollment = async () => {
+    if (!pendingEnrollVerify) return;
+    setIsConfirmingEnrollModal(true);
+    try {
+      if (pendingEnrollVerify.mode === 'direct') {
+        await handleEnrollLevelDirectly(
+          pendingEnrollVerify.program,
+          pendingEnrollVerify.schedule,
+          pendingEnrollVerify.learningGoal
+        );
+      } else {
+        await handleEnrollAdditionalProgram(
+          pendingEnrollVerify.program,
+          pendingEnrollVerify.isReEnrollment,
+          pendingEnrollVerify.schedule
+        );
+      }
+      setPendingEnrollVerify(null);
+    } finally {
+      setIsConfirmingEnrollModal(false);
+    }
+  };
+
+  // 1. Strict Access Lock Screen if user is not logged in with an Account at all
+  if (!studentAccount) {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center bg-[#F8FAFC] text-slate-900 px-6">
         <div className="w-full max-w-md bg-white border border-slate-200 rounded-xl p-8 text-center space-y-5">
@@ -252,10 +761,10 @@ export default function StudentPortalApp() {
           </div>
           <div className="space-y-2">
             <p className="text-xs font-mono uppercase tracking-wider text-rose-700 font-semibold">
-              AKSES TERKUNCI · WAJIB AKUN PELAJAR TERDAFTAR
+              AKSES TERKUNCI · WAJIB LOGIN AKUN PELAJAR
             </p>
             <h1 className="text-xl font-bold text-slate-900 font-display">
-              Halaman pelajar.html Khusus Pelajar yang Sudah Terdaftar & Memiliki Akun
+              Portal Pelajar Khusus Akun Terdaftar
             </h1>
             <p className="text-xs text-slate-600 leading-relaxed">
               {authChecking
@@ -275,7 +784,7 @@ export default function StudentPortalApp() {
               href="./index.html#/pendaftaran"
               className="w-full inline-flex items-center justify-center px-5 py-2.5 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors"
             >
-              Belum Terdaftar? Daftar Program Dulu (index.html)
+              Belum Memiliki Akun? Buat Akun & Daftar (index.html)
             </a>
           </div>
         </div>
@@ -283,9 +792,318 @@ export default function StudentPortalApp() {
     );
   }
 
+  // 2. Active Account but No Level Selected Yet: Display Level Selection Screen (No Redirect Loop!)
+  if (!studentRegistration) {
+    return (
+      <div className="min-h-screen bg-[#FBF9F5] text-slate-800 flex flex-col font-sans">
+        {/* Top Navbar */}
+        <header className="sticky top-0 z-30 bg-white/95 backdrop-blur-md border-b border-slate-200">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <a href="./index.html" className="font-display font-bold text-lg text-emerald-950 tracking-tight">
+                Tadribul Lughah
+              </a>
+              <span className="hidden sm:inline-block text-xs font-mono text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+                PORTAL PELAJAR (pelajar.html)
+              </span>
+            </div>
+            <div className="flex items-center gap-3">
+              <div className="text-right hidden sm:block">
+                <p className="text-xs font-bold text-slate-900">{studentAccount.fullName}</p>
+                <p className="text-[11px] font-mono text-slate-500">ID: {studentAccount.registrationNumber}</p>
+              </div>
+              <button
+                type="button"
+                onClick={handleLogoutStudent}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-rose-700 hover:text-rose-800 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-lg transition-colors"
+              >
+                <LogOut className="w-3.5 h-3.5" />
+                <span>Keluar Akun</span>
+              </button>
+            </div>
+          </div>
+        </header>
+
+        {/* Main Content Area */}
+        <main className="flex-1 max-w-6xl w-full mx-auto px-4 sm:px-6 py-8 space-y-6">
+          {/* Welcome Alert */}
+          <div className="bg-white border border-emerald-200 rounded-2xl p-6 sm:p-8 shadow-xs relative overflow-hidden">
+            <div className="absolute top-0 right-0 w-64 h-64 bg-emerald-50 rounded-full blur-3xl pointer-events-none -mr-20 -mt-20" />
+            <div className="relative flex flex-col sm:flex-row items-start sm:items-center justify-between gap-5">
+              <div className="flex items-start gap-4">
+                <div className="w-14 h-14 rounded-2xl bg-emerald-100 text-emerald-900 flex items-center justify-center shrink-0 shadow-xs">
+                  <GraduationCap className="w-7 h-7" />
+                </div>
+                <div className="space-y-1.5">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="px-2.5 py-0.5 text-[11px] font-mono font-semibold uppercase bg-emerald-100 text-emerald-900 rounded-md">
+                      AKUN AKTIF TERDAFTAR
+                    </span>
+                    <span className="text-xs text-slate-500">
+                      ID Akun: <span className="font-mono font-semibold text-slate-800">{studentAccount.registrationNumber}</span>
+                    </span>
+                    <span className="text-xs text-slate-400">·</span>
+                    <span className="text-xs text-slate-500">{studentAccount.email}</span>
+                  </div>
+                  <h1 className="text-xl sm:text-2xl font-bold text-slate-900 font-display">
+                    Ahlan wa Sahlan, {studentAccount.fullName}!
+                  </h1>
+                  <p className="text-xs sm:text-sm text-slate-600 max-w-2xl leading-relaxed">
+                    Akun Anda telah aktif di sistem Ma'had Tadribul Lughah. Saat ini Anda <strong>belum memilih level pembelajaran</strong>. Silakan tentukan level yang ingin Anda pelajari di bawah ini untuk langsung membuka silabus materi, jadwal halaqah online, materi kitab, dan pencatatan presensi.
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Program Levels Grid */}
+          <div className="space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div>
+                <h2 className="text-base font-bold text-slate-900">
+                  Pilih Level Pembelajaran Tersedia
+                </h2>
+                <p className="text-xs text-slate-500">
+                  Satu akun pelajar dapat memilih dan mengikuti hingga 4 level pembelajaran berjenjang secara terstruktur.
+                </p>
+              </div>
+              <a
+                href="./index.html#/pendaftaran"
+                className="text-xs font-semibold text-emerald-800 hover:text-emerald-900 hover:underline flex items-center gap-1 shrink-0"
+              >
+                <span>Buka Formulir Pendaftaran Lengkap</span>
+                <ArrowRight className="w-3.5 h-3.5" />
+              </a>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {programs.slice(0, 4).map((prog) => {
+                const progSchedules = schedules.filter((s) => s.programId === prog.id);
+                const openProgSchedules = progSchedules.filter((s) =>
+                  isScheduleRegistrationOpen(s, prog)
+                );
+                const isClosed = !isProgramHasAnyOpenSchedule(prog, schedules);
+                const isSelectedToEnroll = !isClosed && pendingLevelId === prog.id;
+
+                const defaultSchedule = getPreferredScheduleForProgram(prog, schedules);
+                const selectedSchForProg = isSelectedToEnroll
+                  ? openProgSchedules.find((s) => s.id === pendingScheduleId)
+                  : undefined;
+                const displaySchedule = selectedSchForProg || defaultSchedule;
+                const displayAngkatan =
+                  displaySchedule?.angkatan?.trim() || prog.angkatan || 'Angkatan 1';
+                const displayStartDate =
+                  displaySchedule?.startDate || prog.startDate || '19 November 2026';
+                const displayDays = displaySchedule?.days || prog.scheduleDays;
+                const displayTime = displaySchedule?.timeWIB || prog.scheduleTime;
+
+                return (
+                  <div
+                    key={prog.id}
+                    className={`rounded-xl border transition-all flex flex-col justify-between relative ${
+                      isSelectedToEnroll
+                        ? 'bg-white border-emerald-900 ring-2 ring-emerald-800 shadow-md'
+                        : 'bg-white border-slate-200 hover:border-slate-300'
+                    }`}
+                  >
+                    {/* Card Header */}
+                    <div className="p-5 sm:p-6 border-b border-slate-100 space-y-2 rounded-t-xl">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-xs font-mono font-bold text-emerald-800 px-2.5 py-0.5 rounded-md bg-emerald-100">
+                          {prog.code} · {displayAngkatan}
+                        </span>
+                        <span className="text-xs font-semibold text-slate-500">
+                          {prog.category === 'shorof' ? 'Morfologi Arab' : 'Sintaksis Nahwu'}
+                        </span>
+                      </div>
+
+                      <div className="pt-1 flex items-baseline justify-between gap-4">
+                        <h3 className="text-base sm:text-lg font-bold text-slate-900">
+                          {prog.title}
+                        </h3>
+                        <span
+                          dir="rtl"
+                          className="font-arabic text-lg text-slate-600 shrink-0"
+                        >
+                          {prog.arabicTitle || prog.title}
+                        </span>
+                      </div>
+
+                      <p className="text-xs text-slate-600 line-clamp-2">
+                        {prog.summary || prog.targetOutcome}
+                      </p>
+                    </div>
+
+                    {/* Card Body: Schedule & Pricing */}
+                    <div className="p-5 sm:p-6 space-y-3 text-xs text-slate-700 bg-slate-50/50">
+                      <div className="flex items-center justify-between">
+                        <span className="text-slate-500">Angkatan Program</span>
+                        <span className="font-semibold text-emerald-900 bg-emerald-100/70 px-2 py-0.5 rounded border border-emerald-300">
+                          {displayAngkatan}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-slate-500">Mulai Program</span>
+                        <span className="font-mono font-bold text-emerald-900 flex items-center gap-1.5 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+                          <Calendar className="w-3.5 h-3.5 text-emerald-800" />
+                          <span>{displayStartDate}</span>
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-slate-500">Jadwal Kelas Malam</span>
+                        <span className="font-mono font-semibold text-slate-900">
+                          {displayDays} ({displayTime})
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-slate-500">Kitab Rujukan</span>
+                        <span className="font-medium text-slate-900 text-right">
+                          {prog.kitabReference}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between pt-2 border-t border-slate-200">
+                        <span className="font-semibold text-slate-900">Biaya Level</span>
+                        <div className="text-right">
+                          <span className="font-mono font-bold text-emerald-900 text-sm">
+                            {formatIDR(prog.tuitionIDR)}
+                          </span>
+                          <span className="block text-[11px] font-mono text-slate-500">
+                            Cicilan 6x: {formatIDR(Math.round(prog.tuitionIDR / 6))}/bln
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Card Footer: Status & Interactive Actions */}
+                    <div className="p-5 sm:p-6 bg-white border-t border-slate-100 space-y-3 rounded-b-xl">
+                      {isClosed ? (
+                        <div className="p-3 bg-rose-50 border border-rose-200 rounded-lg text-xs text-rose-900 flex items-center gap-2 font-medium">
+                          <AlertCircle className="w-4 h-4 text-rose-700 shrink-0" />
+                          <span>Pendaftaran Level Ini Sedang Ditutup (OFF) oleh Superadmin</span>
+                        </div>
+                      ) : isSelectedToEnroll ? (
+                        <div className="space-y-3 pt-1">
+                          <div className="p-2.5 bg-emerald-50/80 border border-emerald-200 rounded-lg text-xs flex items-center justify-between">
+                            <span className="text-slate-700 font-medium">Angkatan Pembelajaran:</span>
+                            <span className="font-bold text-emerald-900 bg-white px-2 py-0.5 rounded border border-emerald-300">
+                              {displayAngkatan}
+                            </span>
+                          </div>
+
+                          <div className="space-y-2">
+                            <label
+                              htmlFor={`portal-sch-select-${prog.id}`}
+                              className="block text-xs font-semibold text-slate-800"
+                            >
+                              Pilih Jadwal Kelas Online (1 Angkatan = 1 Kelas):
+                            </label>
+                            <ScheduleClassSelector
+                              id={`portal-sch-select-${prog.id}`}
+                              schedules={openProgSchedules}
+                              selectedScheduleId={displaySchedule.id}
+                              programAngkatan={prog.angkatan || 'Angkatan 1'}
+                              onSelect={(schId) => setPendingScheduleId(schId)}
+                            />
+                          </div>
+
+                          <div className="space-y-1">
+                            <label
+                              htmlFor={`portal-goal-${prog.id}`}
+                              className="block text-xs font-semibold text-slate-800"
+                            >
+                              Target Belajar (Opsional):
+                            </label>
+                            <input
+                              id={`portal-goal-${prog.id}`}
+                              type="text"
+                              value={pendingLearningGoal}
+                              onChange={(e) => setPendingLearningGoal(e.target.value)}
+                              placeholder="Contoh: Menguasai baca kitab gundul..."
+                              className="w-full px-3 py-2 text-xs bg-white border border-slate-300 rounded-lg text-slate-900 focus:outline-none focus:border-emerald-800"
+                            />
+                          </div>
+
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() =>
+                                handleRequestDirectEnrollConfirm(prog, displaySchedule, pendingLearningGoal)
+                              }
+                              className="flex-1 inline-flex items-center justify-center gap-2 px-4 py-2.5 text-xs font-semibold text-white bg-emerald-900 hover:bg-emerald-800 rounded-lg transition-colors shadow-xs cursor-pointer"
+                            >
+                              <span>
+                                Konfirmasi Pendaftaran Level {prog.levelNumber} – {displayAngkatan} ({formatIDR(prog.tuitionIDR)})
+                              </span>
+                              <ArrowRight className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setPendingLevelId('');
+                                setPendingLearningGoal('');
+                              }}
+                              className="px-3 py-2.5 text-xs font-medium text-slate-600 hover:bg-slate-100 rounded-lg border border-slate-300 cursor-pointer"
+                            >
+                              Batal
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setPendingLevelId(prog.id);
+                            setPendingScheduleId(defaultSchedule.id);
+                            setPendingLearningGoal('');
+                          }}
+                          className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 text-xs font-semibold text-white bg-slate-900 hover:bg-emerald-900 rounded-lg transition-colors cursor-pointer"
+                        >
+                          <span>Pilih &amp; Daftar Level {prog.levelNumber} ({displayAngkatan}) →</span>
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </main>
+
+        <EnrollmentConfirmModal
+          pending={pendingEnrollVerify}
+          studentName={studentAccount.fullName}
+          studentEmail={studentAccount.email}
+          studentWhatsapp={studentAccount.whatsapp}
+          isSubmitting={isConfirmingEnrollModal}
+          onCancel={() => setPendingEnrollVerify(null)}
+          onConfirm={handleExecuteVerifiedEnrollment}
+        />
+      </div>
+    );
+  }
+
   const currentRegistration =
+    (activeRegistrationNumber
+      ? enrolledRegistrations.find((r) => r.registrationNumber === activeRegistrationNumber)
+      : null) ||
     enrolledRegistrations.find((r) => r.selectedProgramId === activeEnrolledProgramId) ||
-    studentRegistration;
+    enrolledRegistrations[0] ||
+    studentRegistration || {
+      registrationNumber: studentAccount.registrationNumber,
+      fullName: studentAccount.fullName,
+      email: studentAccount.email,
+      whatsapp: studentAccount.whatsapp,
+      occupation: studentAccount.occupation || 'Pelajar',
+      city: studentAccount.city || 'Indonesia',
+      selectedProgramId: 'tl-level-1',
+      selectedProgramName: 'Tadribul Lughah Level 1 — Nahwu Dasar',
+      selectedScheduleId: 'sch-lv1-malam',
+      selectedScheduleSummary: 'Kamis & Jumat (20.00 – 22.00 WIB) · Online',
+      learningGoal: 'Belajar kaidah bahasa Arab',
+      totalTuitionIDR: 510000,
+      registeredAt: studentAccount.createdAt,
+      status: 'Terverifikasi — Menunggu Orientasi'
+    };
 
   const enrolledProgram =
     programs.find((p) => p.id === currentRegistration.selectedProgramId) ||
@@ -295,17 +1113,279 @@ export default function StudentPortalApp() {
 
   const enrolledSchedule =
     schedules.find((s) => s.id === currentRegistration.selectedScheduleId) ||
+    schedules.find(
+      (s) =>
+        Boolean(currentRegistration.selectedScheduleSummary) &&
+        currentRegistration.selectedScheduleSummary.includes(s.batchCode)
+    ) ||
     schedules.find((s) => s.programId === enrolledProgram.id) ||
     schedules[0] ||
     CLASS_SCHEDULES[0];
 
-  const completedModulesForProgram = enrolledProgram.modules.filter((_, idx) =>
-    studentAccount.completedModuleKeys.includes(`${enrolledProgram.id}-${idx}`)
-  ).length;
+  const matchBatch = currentRegistration.selectedProgramName?.match(/(Angkatan\s*\d+)/i);
+  const activeBatchLabel = matchBatch ? matchBatch[1] : (enrolledProgram.angkatan || 'Angkatan 1');
+  const isBatchGraduated =
+    currentRegistration.status?.toLowerCase().includes('lulus') ||
+    (currentRegistration.installmentPaidCount !== undefined &&
+      currentRegistration.installmentPaidCount >= 6 &&
+      currentRegistration.registrationNumber === 'TL-2026-8452');
+
+  const isModuleDoneForCurrentRegistration = (moduleIdx: number, pekanNum: number): boolean => {
+    const regNo = (currentRegistration.registrationNumber || '').toUpperCase();
+    const completedKeys = studentAccount?.completedModuleKeys || [];
+
+    // 1. Direct scoped key for this registration (e.g. TL-2026-8453-modul-0)
+    if (
+      completedKeys.includes(`${regNo}-modul-${moduleIdx}`) ||
+      completedKeys.includes(`${regNo}-${enrolledProgram.id}-${moduleIdx}`) ||
+      completedKeys.includes(`${regNo}-pekan-${pekanNum}`)
+    ) {
+      return true;
+    }
+
+    // 2. Backward compatibility: if this is the FIRST/primary registration of this program
+    const firstRegForProgram = enrolledRegistrations.find(
+      (r) => r.selectedProgramId === enrolledProgram.id
+    );
+    const isFirstRegistration = !firstRegForProgram || firstRegForProgram.registrationNumber.toUpperCase() === regNo;
+
+    if (isFirstRegistration) {
+      if (
+        completedKeys.includes(`${enrolledProgram.id}-${moduleIdx}`) ||
+        completedKeys.includes(`${enrolledProgram.id}-pekan-${pekanNum}`)
+      ) {
+        return true;
+      }
+    }
+
+    return false;
+  };
+
+  const completedModulesForProgram = enrolledProgram.modules.filter((mod, idx) => {
+    const pekanNum = getModulePekanNumber(mod.weekRange, idx);
+    const scoreKey = `${enrolledProgram.id}-pekan-${pekanNum}`;
+    const examStatus = isPekanExamAlreadySubmitted(
+      studentAccount?.email || studentAccount?.registrationNumber || '',
+      scoreKey,
+      currentRegistration.registrationNumber
+    );
+    return isModuleDoneForCurrentRegistration(idx, pekanNum) || (examStatus.submitted && (examStatus.score ?? 0) >= 70);
+  }).length;
   const totalModulesForProgram = enrolledProgram.modules.length || 4;
   const progressPercentage = Math.round(
     (completedModulesForProgram / totalModulesForProgram) * 100
   );
+
+  // --- Kalkulasi Keuangan & Sisa Cicilan Pendidikan ---
+  const totalTuition = currentRegistration.totalTuitionIDR || enrolledProgram.tuitionIDR || 510000;
+  const totalInstallmentMonths = 6;
+  const monthlyInstallment = Math.round(totalTuition / totalInstallmentMonths); // default Rp 85.000
+
+  // Nominal yang sudah dibayar santri
+  const paidTuition = typeof currentRegistration.paidTuitionIDR === 'number'
+    ? currentRegistration.paidTuitionIDR
+    : 0;
+
+  // Jumlah cicilan yang sudah lunas (0 - 6)
+  const paidInstallmentsCount = typeof currentRegistration.installmentPaidCount === 'number'
+    ? currentRegistration.installmentPaidCount
+    : Math.min(totalInstallmentMonths, Math.floor(paidTuition / (monthlyInstallment || 85000)));
+
+  const remainingTuition = Math.max(0, totalTuition - paidTuition);
+  const remainingInstallmentsCount = Math.max(0, totalInstallmentMonths - paidInstallmentsCount);
+  const isTuitionFullyPaid = remainingTuition === 0 || paidInstallmentsCount >= totalInstallmentMonths;
+  const paymentProgressPercent = Math.min(100, Math.round((paidTuition / totalTuition) * 100));
+
+  // --- Kalkulasi Pertemuan & Presensi Online Live Zoom ---
+  const programMeetings = buildProgramMeetings(enrolledProgram, enrolledSchedule);
+
+  const totalMeetingsCount = programMeetings.length || enrolledProgram.sessionsCount || 22;
+
+  const studentAttendances = getStudentAttendanceRecords(
+    (currentRegistration.registrationNumber || '').toUpperCase(),
+    enrolledProgram.id
+  );
+
+  const attendedCount = programMeetings.filter((m) => {
+    const key = `${(currentRegistration.registrationNumber || '').toUpperCase()}_${enrolledProgram.id}_s${m.sessionNumber}`;
+    return studentAttendances[key]?.status === 'hadir';
+  }).length;
+
+  const excusedCount = programMeetings.filter((m) => {
+    const key = `${(currentRegistration.registrationNumber || '').toUpperCase()}_${enrolledProgram.id}_s${m.sessionNumber}`;
+    const st = studentAttendances[key]?.status;
+    return st === 'izin' || st === 'sakit';
+  }).length;
+
+  const sickCount = programMeetings.filter((m) => {
+    const key = `${(currentRegistration.registrationNumber || '').toUpperCase()}_${enrolledProgram.id}_s${m.sessionNumber}`;
+    return studentAttendances[key]?.status === 'sakit';
+  }).length;
+
+  const unattendedCount = Math.max(0, totalMeetingsCount - (attendedCount + excusedCount));
+
+  const attendanceRate = totalMeetingsCount > 0
+    ? Math.round((attendedCount / totalMeetingsCount) * 100)
+    : 0;
+
+  const isAttendanceQualified = attendanceRate >= 75; // Minimal 75% kehadiran untuk kelulusan
+
+  const handleSelectSessionForAbsen = (sessionNum: number) => {
+    setSelectedSessionForAbsen(sessionNum);
+    const key = `${(currentRegistration.registrationNumber || '').toUpperCase()}_${enrolledProgram.id}_s${sessionNum}`;
+    const existing = studentAttendances[key];
+    if (existing) {
+      setAbsenStatus(existing.status);
+      setAbsenNotes(existing.notes || '');
+    } else {
+      setAbsenStatus('hadir');
+      setAbsenNotes('');
+    }
+  };
+
+  const handleOpenAttendanceModal = (sessionNum: number) => {
+    if (!isAttendanceSessionUnlocked(enrolledProgram.id, sessionNum)) {
+      alert(`Mohon maaf, presensi untuk Pertemuan ke-${sessionNum} belum diizinkan / dibuka oleh Superadmin/Pengajar.`);
+      return;
+    }
+    setAttendanceTargetSession(sessionNum);
+    setSelectedSessionForAbsen(sessionNum);
+    const key = `${(currentRegistration.registrationNumber || '').toUpperCase()}_${enrolledProgram.id}_s${sessionNum}`;
+    const existing = studentAttendances[key];
+    if (existing) {
+      setModalAbsenStatus(existing.status);
+      setModalAbsenNotes(existing.notes || '');
+    } else {
+      setModalAbsenStatus('hadir');
+      setModalAbsenNotes('');
+    }
+    setIsAttendanceModalOpen(true);
+  };
+  openAttendanceModalRef.current = handleOpenAttendanceModal;
+
+  const handleSaveAttendanceFromModal = () => {
+    if (attendanceTargetSession === null) return;
+    handleSubmitAttendance(attendanceTargetSession, modalAbsenStatus, modalAbsenNotes);
+    setIsAttendanceModalOpen(false);
+  };
+
+  const handleSubmitAttendance = (sessionNum: number, status: AttendanceStatus, notes?: string) => {
+    if (!isAttendanceSessionUnlocked(enrolledProgram.id, sessionNum)) {
+      alert(`Mohon maaf, presensi untuk Pertemuan ke-${sessionNum} belum diizinkan oleh Superadmin.`);
+      return;
+    }
+    const meeting = programMeetings.find((m) => m.sessionNumber === sessionNum);
+    const nowStr = new Intl.DateTimeFormat('id-ID', {
+      day: '2-digit',
+      month: 'long',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
+    }).format(new Date()) + ' WIB';
+
+    const defaultNote = status === 'hadir'
+      ? 'Hadir di kelas Live Zoom'
+      : status === 'izin'
+        ? (notes?.trim() || 'Izin berhalangan hadir')
+        : (notes?.trim() || 'Sakit berhalangan hadir');
+
+    const entry: AttendanceEntry = {
+      id: `${(currentRegistration.registrationNumber || '').toUpperCase()}_${enrolledProgram.id}_s${sessionNum}`,
+      registrationNumber: (currentRegistration.registrationNumber || '').toUpperCase(),
+      studentName: studentRegistration.fullName,
+      programId: enrolledProgram.id,
+      sessionNumber: sessionNum,
+      pekanNumber: meeting?.pekanNumber || sessionNum,
+      topicTitle: meeting?.title,
+      status,
+      notes: notes?.trim() || defaultNote,
+      submittedAt: nowStr
+    };
+
+    saveStudentAttendanceEntry(entry);
+    setAttendanceVersion((v) => v + 1);
+    setAbsenSuccessMsg(`Alhamdulillah, presensi Pertemuan ${sessionNum} (${status.toUpperCase()}) berhasil disimpan!`);
+    setTimeout(() => setAbsenSuccessMsg(null), 4000);
+  };
+
+  const handleDownloadAttendanceReport = () => {
+    const regNo = currentRegistration.registrationNumber;
+    let report = `========================================================================\n`;
+    report += `   MA'HAD AL-BAYAN — TADRIBUL LUGHAH\n`;
+    report += `   REKAPITULASI RESMI PRESENSI KEHADIRAN KELAS ONLINE LIVE ZOOM\n`;
+    report += `========================================================================\n\n`;
+    report += `Identitas Santri:\n`;
+    report += `  Nama Lengkap     : ${studentRegistration.fullName}\n`;
+    report += `  Nomor Registrasi : ${regNo}\n`;
+    report += `  Email / Kontak   : ${studentRegistration.email} / ${studentRegistration.whatsapp}\n`;
+    report += `  Program Belajar  : ${enrolledProgram.title}\n`;
+    report += `  Jadwal & Angkatan: ${enrolledSchedule.days} (${enrolledSchedule.timeWIB}) · ${activeBatchLabel}\n`;
+    report += `  Pengajar         : ${enrolledSchedule.instructor}\n`;
+    report += `  Tanggal Cetak    : ${new Date().toLocaleDateString('id-ID')} WIB\n\n`;
+    report += `Ringkasan Kehadiran:\n`;
+    report += `  Total Pertemuan  : ${totalMeetingsCount} Pertemuan\n`;
+    report += `  Jumlah Hadir     : ${attendedCount} Pertemuan\n`;
+    report += `  Izin / Sakit     : ${excusedCount} Pertemuan\n`;
+    report += `  Persentase Hadir : ${attendanceRate}%\n`;
+    report += `  Status Kelulusan : ${isAttendanceQualified ? 'MEMENUHI SYARAT KELULUSAN (MIN. 75%)' : 'BELUM MEMENUHI SYARAT KELULUSAN (MIN. 75%)'}\n\n`;
+    report += `------------------------------------------------------------------------\n`;
+    report += `RINCIAN KEHADIRAN PER PERTEMUAN:\n`;
+    report += `------------------------------------------------------------------------\n`;
+
+    programMeetings.forEach((m) => {
+      const key = `${(regNo || '').toUpperCase()}_${enrolledProgram.id}_s${m.sessionNumber}`;
+      const rec = studentAttendances[key];
+      const statusLabel = rec ? rec.status.toUpperCase() : 'BELUM ABSEN';
+      report += `[Pertemuan ${String(m.sessionNumber).padStart(2, '0')}] ${m.dateStr} (${m.timeWIB})\n`;
+      report += `  Materi   : ${m.title}\n`;
+      report += `  Status   : ${statusLabel}\n`;
+      if (rec?.submittedAt) report += `  Dicatat  : ${rec.submittedAt}\n`;
+      if (rec?.notes) report += `  Catatan  : ${rec.notes}\n`;
+      report += `\n`;
+    });
+
+    report += `========================================================================\n`;
+    report += `Dicatat secara digital oleh Sistem Presensi Tadribul Lughah Ma'had Al-Bayan.\n`;
+    report += `========================================================================\n`;
+
+    const blob = new Blob([report], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `Rekap_Presensi_${studentRegistration.fullName.replace(/\s+/g, '_')}_${regNo}.txt`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  const showToast = (msg: string) => {
+    setToastMsg(msg);
+    setTimeout(() => setToastMsg(null), 3500);
+  };
+
+  const handleCopyText = (text: string, label: string) => {
+    try {
+      navigator.clipboard.writeText(text);
+      showToast(`${label} berhasil disalin ke clipboard!`);
+    } catch {
+      showToast(`${label}: ${text}`);
+    }
+  };
+
+  const getConfirmationWaUrl = (amount: number, installmentIndex?: number) => {
+    const text = `Bismillah Ustadz / Admin Tadribul Lughah, saya santri terdaftar ingin konfirmasi pembayaran cicilan:\n\n- Nama Lengkap: ${currentRegistration.fullName}\n- Nomor Registrasi: ${currentRegistration.registrationNumber}\n- Program: ${enrolledProgram.title}\n- Keterangan: ${installmentIndex ? `Cicilan ke-${installmentIndex} (Bulan ke-${installmentIndex})` : 'Pembayaran Biaya Belajar'}\n- Nominal Transfer: ${formatIDR(amount)}\n- Bank Tujuan: Bank Syariah Indonesia (BSI)\n\nMohon diverifikasi. Syukran wa jazakumullahu khairan.`;
+    return `https://wa.me/6281288419023?text=${encodeURIComponent(text)}`;
+  };
+
+  const installmentMonthsList = [
+    { monthIndex: 1, monthLabel: 'Bulan ke-1 (Pekan 1–4)', note: 'DP / Registrasi Awal Kelas', dueDate: '10 November 2026' },
+    { monthIndex: 2, monthLabel: 'Bulan ke-2 (Pekan 5–8)', note: 'Cicilan Pembelajaran Bulan ke-2', dueDate: '10 Desember 2026' },
+    { monthIndex: 3, monthLabel: 'Bulan ke-3 (Pekan 9–12)', note: 'Cicilan Pembelajaran Bulan ke-3', dueDate: '10 Januari 2027' },
+    { monthIndex: 4, monthLabel: 'Bulan ke-4 (Pekan 13–16)', note: 'Cicilan Pembelajaran Bulan ke-4', dueDate: '10 Februari 2027' },
+    { monthIndex: 5, monthLabel: 'Bulan ke-5 (Pekan 17–20)', note: 'Cicilan Pembelajaran Bulan ke-5', dueDate: '10 Maret 2027' },
+    { monthIndex: 6, monthLabel: 'Bulan ke-6 (Pekan 21–24)', note: 'Pelunasan Menjelang Ujian & Rapor', dueDate: '10 April 2027' }
+  ];
 
   const getModuleStudyContent = (programId: string, idx: number) => {
     if (programId === 'tl-level-1' || !programId) {
@@ -537,11 +1617,36 @@ export default function StudentPortalApp() {
   };
 
   const handleToggleModuleComplete = (moduleIndex: number) => {
-    const key = `${enrolledProgram.id}-${moduleIndex}`;
-    const exists = studentAccount.completedModuleKeys.includes(key);
-    const updatedKeys = exists
-      ? studentAccount.completedModuleKeys.filter((k) => k !== key)
-      : [...studentAccount.completedModuleKeys, key];
+    if (!studentAccount) return;
+    const regNo = (currentRegistration.registrationNumber || '').toUpperCase();
+    const primaryKey = `${regNo}-modul-${moduleIndex}`;
+    const legacyKey = `${enrolledProgram.id}-${moduleIndex}`;
+
+    const currentCompleted = Array.isArray(studentAccount.completedModuleKeys)
+      ? [...studentAccount.completedModuleKeys]
+      : [];
+
+    const mod = enrolledProgram.modules[moduleIndex];
+    const pekanNum = getModulePekanNumber(mod?.weekRange || '', moduleIndex);
+    const isCurrentlyDone = isModuleDoneForCurrentRegistration(moduleIndex, pekanNum);
+
+    const firstRegForProgram = enrolledRegistrations.find(
+      (r) => r.selectedProgramId === enrolledProgram.id
+    );
+    const isFirstRegistration = !firstRegForProgram || firstRegForProgram.registrationNumber.toUpperCase() === regNo;
+
+    let updatedKeys: string[];
+    if (isCurrentlyDone) {
+      updatedKeys = currentCompleted.filter(
+        (k) =>
+          k !== primaryKey &&
+          k !== `${regNo}-${enrolledProgram.id}-${moduleIndex}` &&
+          k !== `${regNo}-pekan-${pekanNum}` &&
+          (!isFirstRegistration || (k !== legacyKey && k !== `${enrolledProgram.id}-pekan-${pekanNum}`))
+      );
+    } else {
+      updatedKeys = [...currentCompleted, primaryKey];
+    }
 
     const updatedAccount: StudentAccount = {
       ...studentAccount,
@@ -551,10 +1656,53 @@ export default function StudentPortalApp() {
     saveStudentAccount(updatedAccount);
   };
 
-  const handleEnrollAdditionalProgram = async (newProgram: ProgramTrack) => {
-    if (!studentAccount) return;
+  const handleEnrollAdditionalProgram = async (
+    newProgram: ProgramTrack,
+    isReEnrollment?: boolean,
+    explicitSchedule?: ClassSchedule | null
+  ) => {
+    if (!studentAccount || enrollingRef.current) return;
+    setUpgradeBanner(null);
+    setUpgradeErrorBanner(null);
+
+    const existingForStudent = getStudentRegistrations(
+      studentAccount.email,
+      loadMergedRegistrations(registrations)
+    );
     const matchingSchedule =
-      schedules.find((s) => s.programId === newProgram.id) || schedules[0];
+      (explicitSchedule && isScheduleRegistrationOpen(explicitSchedule, newProgram)
+        ? explicitSchedule
+        : null) ||
+      (isReEnrollment
+        ? getNextAvailableOpenScheduleForProgram(newProgram, schedules, existingForStudent, programs)
+        : getPreferredScheduleForProgram(newProgram, schedules));
+
+    if (!matchingSchedule || !isScheduleRegistrationOpen(matchingSchedule, newProgram)) {
+      setUpgradeErrorBanner(
+        isReEnrollment
+          ? `Anda sudah terdaftar pada seluruh angkatan yang sedang dibuka untuk ${newProgram.title} (atau pendaftaran angkatan baru sedang ditutup/OFF).`
+          : `Mohon maaf, pendaftaran untuk Level ${newProgram.levelNumber} saat ini sedang ditutup (OFF).`
+      );
+      return;
+    }
+
+    const targetAngkatan = matchingSchedule.angkatan?.trim() || newProgram.angkatan || 'Angkatan 1';
+    const duplicateBatch = findExistingBatchEnrollment(
+      existingForStudent,
+      newProgram.id,
+      targetAngkatan,
+      schedules,
+      programs
+    );
+    if (duplicateBatch) {
+      setUpgradeErrorBanner(
+        `Anda sudah terdaftar di ${newProgram.title} (${targetAngkatan}) dengan nomor registrasi ${duplicateBatch.registrationNumber}. Satu akun tidak dapat mendaftar dua kali pada level dan angkatan yang sama.`
+      );
+      return;
+    }
+
+    enrollingRef.current = true;
+    try {
     const randomDigits = Math.floor(1000 + Math.random() * 9000);
     const newRegNo = `TL-2026-${randomDigits}`;
     const nowStr =
@@ -575,10 +1723,12 @@ export default function StudentPortalApp() {
       occupation: studentAccount.occupation || 'Pelajar Terdaftar',
       city: studentAccount.city || 'Indonesia',
       selectedProgramId: newProgram.id,
-      selectedProgramName: newProgram.title,
+      selectedProgramName: `${newProgram.title} (${targetAngkatan})`,
       selectedScheduleId: matchingSchedule.id,
-      selectedScheduleSummary: `${matchingSchedule.batchCode} · ${matchingSchedule.days} (${matchingSchedule.timeWIB}) · Online`,
-      learningGoal: `Mempelajari ${newProgram.title} dengan akun terdaftar.`,
+      selectedScheduleSummary: `${matchingSchedule.batchCode} · ${matchingSchedule.days} (${matchingSchedule.timeWIB}) · ${targetAngkatan} · Online`,
+      learningGoal: isReEnrollment
+        ? `Mengulang & memantapkan materi ${newProgram.title} di ${targetAngkatan}.`
+        : `Mempelajari ${newProgram.title} (${targetAngkatan}) dengan akun terdaftar.`,
       totalTuitionIDR: newProgram.tuitionIDR,
       registeredAt: nowStr,
       status: 'Terverifikasi — Menunggu Orientasi'
@@ -606,15 +1756,26 @@ export default function StudentPortalApp() {
         doc(db, 'registrationStatuses', newReg.registrationNumber),
         registrationToPublicStatusDoc(newReg)
       );
+      await fetch('./api.php?entity=registrations', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ [newReg.registrationNumber]: newReg })
+      }).catch(() => {});
     } catch {
       // Ignored
     }
 
+    setActiveRegistrationNumber(newRegNo);
     setActiveEnrolledProgramId(newProgram.id);
     setStudentRegistration(newReg);
     setUpgradeBanner(
-      `Pendaftaran ${newProgram.title} berhasil ditambahkan ke akun Anda! Nomor Registrasi: ${newRegNo}.`
+      isReEnrollment
+        ? `Alhamdulillah! Pendaftaran ulang ${newProgram.title} (${targetAngkatan}) berhasil ditambahkan ke akun Anda! Nomor Registrasi baru: ${newRegNo}. Seluruh riwayat dan kelulusan angkatan sebelumnya tetap aman tersimpan di akun Anda.`
+        : `Pendaftaran ${newProgram.title} (${targetAngkatan}) berhasil ditambahkan ke akun Anda! Nomor Registrasi: ${newRegNo}.`
     );
+    } finally {
+      enrollingRef.current = false;
+    }
   };
 
   const handleUpdatePassword = (e: React.FormEvent) => {
@@ -661,7 +1822,7 @@ export default function StudentPortalApp() {
       `Email Akun Pelajar : ${studentAccount.email}`,
       `Nomor WhatsApp     : ${studentAccount.whatsapp}`,
       `Domisili           : ${studentRegistration.city}`,
-      `Status Kepesertaan : ${studentRegistration.status}`,
+      `Status Pembayaran : ${isTuitionFullyPaid ? 'Lunas Penuh (6/6)' : paidInstallmentsCount > 0 ? `Cicilan ${paidInstallmentsCount}/6 Lunas` : 'Belum Lunas (Bulan 1)'}`,
       '--------------------------------------------------------------',
       'KELAS MALAM ONLINE YANG DIIKUTI (20.00 – 22.00 WIB):',
       `Level Program      : ${enrolledProgram.title}`,
@@ -688,11 +1849,26 @@ export default function StudentPortalApp() {
 
   return (
     <div className="min-h-screen flex flex-col bg-[#F8FAFC] text-slate-900">
-      {/* Top Bar Contract: 3 Distinct Zones Separated by gap-8 */}
+      {/* Toast Notification */}
+      {toastMsg && (
+        <div className="fixed top-5 right-5 z-50 bg-slate-900 text-white px-4 py-3 rounded-xl shadow-xl text-xs flex items-center gap-2.5 border border-slate-700 animate-in fade-in">
+          <Sparkles className="w-4 h-4 text-emerald-400 shrink-0" />
+          <span>{toastMsg}</span>
+        </div>
+      )}
+
+      {/* Top Brand Header Bar */}
       <header className="sticky top-0 z-30 bg-white/95 backdrop-blur-xs border-b border-slate-200">
-        <div className="max-w-[1200px] mx-auto px-6 py-4 flex items-center justify-between gap-8">
-          {/* Zone 1: Brand Identity */}
+        <div className="max-w-[1380px] mx-auto px-4 sm:px-6 h-16 flex items-center justify-between gap-4">
           <div className="flex items-center gap-3 shrink-0">
+            <button
+              type="button"
+              onClick={() => setMobileNavOpen((prev) => !prev)}
+              className="md:hidden p-2 rounded-lg border border-slate-200 text-slate-700 hover:bg-slate-100 transition-colors cursor-pointer"
+              aria-label="Buka atau tutup menu navigasi"
+            >
+              {mobileNavOpen ? <X className="w-4 h-4" /> : <Menu className="w-4 h-4" />}
+            </button>
             <a
               href="./pelajar.html"
               className="text-lg font-bold tracking-tight text-slate-900 font-display whitespace-nowrap"
@@ -704,159 +1880,320 @@ export default function StudentPortalApp() {
             </span>
           </div>
 
-          {/* Zone 2: Primary Portal Navigation */}
-          <nav
-            aria-label="Navigasi Portal Pelajar"
-            className="hidden md:flex items-center gap-6 text-sm font-medium"
-          >
-            <button
-              type="button"
-              onClick={() => setActiveTab('dashboard')}
-              className={`py-1 transition-colors whitespace-nowrap ${
-                activeTab === 'dashboard'
-                  ? 'text-emerald-900 font-semibold border-b-2 border-emerald-900'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              Kelas Malam & Zoom
-            </button>
-            <button
-              type="button"
-              onClick={() => setActiveTab('modul')}
-              className={`py-1 transition-colors whitespace-nowrap ${
-                activeTab === 'modul'
-                  ? 'text-emerald-900 font-semibold border-b-2 border-emerald-900'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              Progres Modul ({completedModulesForProgram}/{totalModulesForProgram})
-            </button>
-            <button
-              type="button"
-              onClick={() => setActiveTab('akun')}
-              className={`py-1 transition-colors whitespace-nowrap ${
-                activeTab === 'akun'
-                  ? 'text-emerald-900 font-semibold border-b-2 border-emerald-900'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              Kartu & Akun Pelajar
-            </button>
-          </nav>
-
-          {/* Zone 3: Student Account Identity + Logout */}
-          <div className="flex items-center gap-3 shrink-0">
-            <div className="hidden lg:flex flex-col items-end text-right">
-              <span className="text-xs font-semibold text-slate-900">
-                {studentRegistration.fullName}
-              </span>
-              <span className="text-[11px] font-mono text-emerald-800">
-                {studentRegistration.registrationNumber}
-              </span>
-            </div>
-            <button
-              type="button"
-              onClick={handleLogoutStudent}
-              className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-white bg-rose-700 hover:bg-rose-800 rounded-lg transition-colors whitespace-nowrap shrink-0"
-            >
-              <LogOut className="w-3.5 h-3.5" />
-              <span>Keluar Akun</span>
-            </button>
-          </div>
-        </div>
-      </header>
-
-      {/* Sub-Header Bar: Mobile Tabs & Active Student Account Status */}
-      <div className="bg-white border-b border-slate-200">
-        <div className="max-w-[1200px] mx-auto px-6 py-2.5 flex flex-wrap items-center justify-between gap-3">
-          <div className="flex md:hidden items-center gap-1.5 overflow-x-auto py-1">
-            <button
-              type="button"
-              onClick={() => setActiveTab('dashboard')}
-              className={`px-3 py-1 text-xs font-semibold rounded-md whitespace-nowrap ${
-                activeTab === 'dashboard'
-                  ? 'bg-emerald-900 text-white'
-                  : 'bg-slate-100 text-slate-700'
-              }`}
-            >
-              Kelas Malam
-            </button>
-            <button
-              type="button"
-              onClick={() => setActiveTab('modul')}
-              className={`px-3 py-1 text-xs font-semibold rounded-md whitespace-nowrap ${
-                activeTab === 'modul'
-                  ? 'bg-emerald-900 text-white'
-                  : 'bg-slate-100 text-slate-700'
-              }`}
-            >
-              Modul ({completedModulesForProgram}/{totalModulesForProgram})
-            </button>
-            <button
-              type="button"
-              onClick={() => setActiveTab('akun')}
-              className={`px-3 py-1 text-xs font-semibold rounded-md whitespace-nowrap ${
-                activeTab === 'akun'
-                  ? 'bg-emerald-900 text-white'
-                  : 'bg-slate-100 text-slate-700'
-              }`}
-            >
-              Kartu & Akun
-            </button>
-          </div>
-
-          <div className="hidden md:flex items-center gap-2 text-xs text-slate-600">
-            <UserCheck className="w-4 h-4 text-emerald-800 shrink-0" />
-            <span>
-              Login Akun Pelajar Terdaftar:{' '}
-              <strong className="text-slate-900">
-                {studentRegistration.fullName}
-              </strong>{' '}
-              (<span className="font-mono text-emerald-900">{studentAccount.email}</span>)
-            </span>
-          </div>
-
-          <div className="flex items-center gap-3 ml-auto text-xs">
+          <div className="flex items-center gap-3 text-xs">
             <a
               href="./index.html"
-              className="font-medium text-slate-600 hover:text-slate-900 transition-colors"
+              className="font-medium text-slate-600 hover:text-slate-900 transition-colors whitespace-nowrap"
             >
               ← Ke Halaman Publik (index.html)
             </a>
           </div>
         </div>
+      </header>
+
+      {/* Mobile Quick Tabs Strip */}
+      <div className="md:hidden bg-white border-b border-slate-200 px-4 py-2 overflow-x-auto">
+        <div className="flex items-center gap-1.5 min-w-max">
+          <button
+            type="button"
+            onClick={() => {
+              setActiveTab('dashboard');
+              setMobileNavOpen(false);
+            }}
+            className={`px-3 py-1.5 text-xs font-semibold rounded-lg whitespace-nowrap ${
+              activeTab === 'dashboard'
+                ? 'bg-emerald-900 text-white'
+                : 'bg-slate-100 text-slate-700'
+            }`}
+          >
+            Kelas Malam & Zoom
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setActiveTab('absensi');
+              setMobileNavOpen(false);
+            }}
+            className={`px-3 py-1.5 text-xs font-semibold rounded-lg whitespace-nowrap flex items-center gap-1 ${
+              activeTab === 'absensi'
+                ? 'bg-emerald-900 text-white'
+                : 'bg-slate-100 text-slate-700'
+            }`}
+          >
+            <CalendarCheck className="w-3.5 h-3.5" />
+            <span>Absensi {attendedCount}/{totalMeetingsCount}</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setActiveTab('modul');
+              setMobileNavOpen(false);
+            }}
+            className={`px-3 py-1.5 text-xs font-semibold rounded-lg whitespace-nowrap ${
+              activeTab === 'modul'
+                ? 'bg-emerald-900 text-white'
+                : 'bg-slate-100 text-slate-700'
+            }`}
+          >
+            Modul ({completedModulesForProgram}/{totalModulesForProgram})
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setActiveTab('pembayaran');
+              setMobileNavOpen(false);
+            }}
+            className={`px-3 py-1.5 text-xs font-semibold rounded-lg whitespace-nowrap flex items-center gap-1 ${
+              activeTab === 'pembayaran'
+                ? 'bg-emerald-900 text-white'
+                : 'bg-slate-100 text-slate-700'
+            }`}
+          >
+            <CreditCard className="w-3.5 h-3.5" />
+            <span>Cicilan</span>
+            {!isTuitionFullyPaid && (
+              <span className={`px-1.5 rounded-full text-[10px] font-mono font-bold ${
+                activeTab === 'pembayaran' ? 'bg-amber-400 text-slate-950' : 'bg-amber-200 text-amber-950'
+              }`}>
+                {remainingInstallmentsCount}x
+              </span>
+            )}
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setActiveTab('akun');
+              setMobileNavOpen(false);
+            }}
+            className={`px-3 py-1.5 text-xs font-semibold rounded-lg whitespace-nowrap ${
+              activeTab === 'akun'
+                ? 'bg-emerald-900 text-white'
+                : 'bg-slate-100 text-slate-700'
+            }`}
+          >
+            Kartu & Akun
+          </button>
+        </div>
       </div>
 
-      {/* Main Student Portal Content */}
-      <main className="flex-1 py-10 sm:py-12">
-        <div className="max-w-[1200px] mx-auto px-6 space-y-8">
-          {/* Multi-Program Level Selector (1 Akun untuk 4 Program) */}
+      {/* Portal Layout: Left Sidebar Navigation + Main Content */}
+      <div className="flex-1 max-w-[1380px] w-full mx-auto px-4 sm:px-6 py-6 sm:py-8 flex flex-col md:flex-row gap-6 lg:gap-8 items-start">
+        {/* Left Sidebar Navigation */}
+        <aside
+          className={`w-full md:w-72 shrink-0 md:sticky md:top-24 ${
+            mobileNavOpen ? 'block' : 'hidden md:block'
+          }`}
+        >
+          <div className="bg-white border border-slate-200 rounded-2xl shadow-2xs overflow-hidden">
+            {/* Student Account Summary */}
+            <div className="p-4 sm:p-5 bg-gradient-to-br from-emerald-950 via-emerald-900 to-slate-900 text-white space-y-2 border-b border-emerald-800">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[10px] font-mono font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-emerald-800/80 text-emerald-200 border border-emerald-600/40">
+                  Pelajar Terdaftar
+                </span>
+                <span className="text-[11px] font-mono font-semibold text-emerald-300">
+                  {studentRegistration.registrationNumber}
+                </span>
+              </div>
+              <div>
+                <p className="text-sm font-bold text-white leading-snug">
+                  {studentRegistration.fullName}
+                </p>
+                <p className="text-[11px] font-mono text-emerald-200/90 truncate">
+                  {studentAccount.email}
+                </p>
+              </div>
+            </div>
+
+            {/* Vertical Navigation Links */}
+            <nav
+              aria-label="Navigasi Portal Pelajar"
+              className="p-2.5 space-y-1 text-xs font-medium"
+            >
+              <button
+                type="button"
+                onClick={() => {
+                  setActiveTab('dashboard');
+                  setMobileNavOpen(false);
+                }}
+                className={`w-full flex items-center justify-between gap-2.5 px-3.5 py-2.5 rounded-xl transition-colors cursor-pointer text-left ${
+                  activeTab === 'dashboard'
+                    ? 'bg-emerald-900 text-white font-semibold shadow-xs'
+                    : 'text-slate-700 hover:bg-slate-100 hover:text-slate-950'
+                }`}
+              >
+                <span className="flex items-center gap-2.5">
+                  <Video className={`w-4 h-4 shrink-0 ${activeTab === 'dashboard' ? 'text-emerald-300' : 'text-emerald-800'}`} />
+                  <span>Kelas Malam & Zoom</span>
+                </span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setActiveTab('absensi');
+                  setMobileNavOpen(false);
+                }}
+                className={`w-full flex items-center justify-between gap-2.5 px-3.5 py-2.5 rounded-xl transition-colors cursor-pointer text-left ${
+                  activeTab === 'absensi'
+                    ? 'bg-emerald-900 text-white font-semibold shadow-xs'
+                    : 'text-slate-700 hover:bg-slate-100 hover:text-slate-950'
+                }`}
+              >
+                <span className="flex items-center gap-2.5">
+                  <CalendarCheck className={`w-4 h-4 shrink-0 ${activeTab === 'absensi' ? 'text-emerald-300' : 'text-emerald-800'}`} />
+                  <span>Absensi Online</span>
+                </span>
+                <span
+                  className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-bold ${
+                    activeTab === 'absensi'
+                      ? 'bg-emerald-800 text-emerald-100 border border-emerald-600'
+                      : isAttendanceQualified
+                        ? 'bg-emerald-100 text-emerald-900 border border-emerald-300'
+                        : 'bg-slate-100 text-slate-700 border border-slate-300'
+                  }`}
+                >
+                  {attendedCount}/{totalMeetingsCount}
+                </span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setActiveTab('modul');
+                  setMobileNavOpen(false);
+                }}
+                className={`w-full flex items-center justify-between gap-2.5 px-3.5 py-2.5 rounded-xl transition-colors cursor-pointer text-left ${
+                  activeTab === 'modul'
+                    ? 'bg-emerald-900 text-white font-semibold shadow-xs'
+                    : 'text-slate-700 hover:bg-slate-100 hover:text-slate-950'
+                }`}
+              >
+                <span className="flex items-center gap-2.5">
+                  <BookOpen className={`w-4 h-4 shrink-0 ${activeTab === 'modul' ? 'text-emerald-300' : 'text-emerald-800'}`} />
+                  <span>Progres Modul</span>
+                </span>
+                <span
+                  className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-bold ${
+                    activeTab === 'modul'
+                      ? 'bg-emerald-800 text-emerald-100 border border-emerald-600'
+                      : 'bg-slate-100 text-slate-700 border border-slate-300'
+                  }`}
+                >
+                  {completedModulesForProgram}/{totalModulesForProgram}
+                </span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setActiveTab('pembayaran');
+                  setMobileNavOpen(false);
+                }}
+                className={`w-full flex items-center justify-between gap-2.5 px-3.5 py-2.5 rounded-xl transition-colors cursor-pointer text-left ${
+                  activeTab === 'pembayaran'
+                    ? 'bg-emerald-900 text-white font-semibold shadow-xs'
+                    : 'text-slate-700 hover:bg-slate-100 hover:text-slate-950'
+                }`}
+              >
+                <span className="flex items-center gap-2.5">
+                  <CreditCard className={`w-4 h-4 shrink-0 ${activeTab === 'pembayaran' ? 'text-emerald-300' : 'text-emerald-800'}`} />
+                  <span>Biaya & Sisa Cicilan</span>
+                </span>
+                {!isTuitionFullyPaid && (
+                  <span
+                    className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-bold ${
+                      activeTab === 'pembayaran'
+                        ? 'bg-amber-400 text-slate-950'
+                        : 'bg-amber-100 text-amber-900 border border-amber-300'
+                    }`}
+                  >
+                    {remainingInstallmentsCount}x
+                  </span>
+                )}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setActiveTab('akun');
+                  setMobileNavOpen(false);
+                }}
+                className={`w-full flex items-center justify-between gap-2.5 px-3.5 py-2.5 rounded-xl transition-colors cursor-pointer text-left ${
+                  activeTab === 'akun'
+                    ? 'bg-emerald-900 text-white font-semibold shadow-xs'
+                    : 'text-slate-700 hover:bg-slate-100 hover:text-slate-950'
+                }`}
+              >
+                <span className="flex items-center gap-2.5">
+                  <UserCheck className={`w-4 h-4 shrink-0 ${activeTab === 'akun' ? 'text-emerald-300' : 'text-emerald-800'}`} />
+                  <span>Kartu & Akun Pelajar</span>
+                </span>
+              </button>
+            </nav>
+
+            {/* Sidebar Bottom Logout */}
+            <div className="p-3 bg-slate-50 border-t border-slate-200 space-y-2">
+              <button
+                type="button"
+                onClick={handleLogoutStudent}
+                className="w-full inline-flex items-center justify-center gap-2 px-3.5 py-2 text-xs font-semibold text-white bg-rose-700 hover:bg-rose-800 rounded-xl transition-colors cursor-pointer shadow-2xs"
+              >
+                <LogOut className="w-3.5 h-3.5" />
+                <span>Keluar Akun</span>
+              </button>
+            </div>
+          </div>
+        </aside>
+
+        {/* Main Student Portal Content */}
+        <main className="flex-1 min-w-0 w-full">
+          <div className="space-y-8">
+          {/* Multi-Program Level & Batch Selector */}
           <div className="bg-white border border-slate-200 rounded-xl p-4 sm:p-5 flex flex-col md:flex-row md:items-center justify-between gap-4">
             <div className="flex flex-wrap items-center gap-2">
               <span className="text-xs font-semibold text-slate-700 uppercase tracking-wider font-mono mr-1">
-                Level Terdaftar Anda ({enrolledRegistrations.length}/4 Level):
+                Riwayat & Kelas Terdaftar ({enrolledRegistrations.length}):
               </span>
               {enrolledRegistrations.map((reg) => {
                 const prog = programs.find((p) => p.id === reg.selectedProgramId) || programs[0];
-                const isActive = reg.selectedProgramId === activeEnrolledProgramId;
+                const isActive = reg.registrationNumber === currentRegistration.registrationNumber;
+                const isPaidFull = reg.installmentPaidCount && reg.installmentPaidCount >= 6;
+                const matchBatch = reg.selectedProgramName?.match(/(Angkatan\s*\d+)/i);
+                const batchLabel = matchBatch ? matchBatch[1] : (prog.angkatan || 'Angkatan 1');
                 return (
                   <button
                     key={reg.registrationNumber}
                     type="button"
-                    onClick={() => {
-                      setActiveEnrolledProgramId(reg.selectedProgramId);
-                      setStudentRegistration(reg);
-                    }}
-                    className={`inline-flex items-center gap-2 px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors ${
+                    onClick={() => handleSelectRegistration(reg)}
+                    className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors cursor-pointer ${
                       isActive
-                        ? 'bg-emerald-900 text-white shadow-xs'
+                        ? 'bg-emerald-900 text-white shadow-xs ring-2 ring-emerald-600'
                         : 'bg-slate-100 text-slate-700 hover:bg-slate-200 border border-slate-300'
                     }`}
                   >
-                    <span>{prog.code} ({prog.category === 'shorof' ? 'Shorof' : 'Nahwu'})</span>
-                    <span className="font-mono text-[11px] opacity-80">
-                      {reg.registrationNumber}
+                    <span>{prog.code}</span>
+                    {batchLabel && (
+                      <span className={`text-[10px] px-1.5 py-0.5 rounded font-mono font-bold ${
+                        isActive ? 'bg-emerald-800 text-emerald-100' : 'bg-emerald-100 text-emerald-900 border border-emerald-300'
+                      }`}>
+                        {batchLabel}
+                      </span>
+                    )}
+                    <span className="font-mono text-[11px] opacity-90">
+                      ({reg.registrationNumber})
                     </span>
+                    {isPaidFull ? (
+                      <span className={`text-[10px] px-1.5 py-0.5 rounded font-bold ${
+                        isActive ? 'bg-emerald-800 text-emerald-100' : 'bg-emerald-100 text-emerald-900'
+                      }`}>
+                        Lunas ✓
+                      </span>
+                    ) : (
+                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-900 font-bold border border-amber-300">
+                        {reg.installmentPaidCount || 0}/6
+                      </span>
+                    )}
                   </button>
                 );
               })}
@@ -881,7 +2218,13 @@ export default function StudentPortalApp() {
                   <span>·</span>
                   <span>NO. REG: {currentRegistration.registrationNumber}</span>
                   <span>·</span>
-                  <span>{currentRegistration.status.toUpperCase()}</span>
+                  <span>
+                    {isTuitionFullyPaid
+                      ? 'LUNAS PENUH (6/6)'
+                      : paidInstallmentsCount > 0
+                        ? `CICILAN ${paidInstallmentsCount}/6 LUNAS`
+                        : 'BELUM LUNAS (BULAN 1)'}
+                  </span>
                 </div>
                 <h1 className="text-2xl sm:text-3xl font-bold text-white font-display tracking-tight">
                   Ahlan wa Sahlan, {currentRegistration.fullName}
@@ -955,9 +2298,14 @@ export default function StudentPortalApp() {
                   {/* 4 Key Academic Metrics */}
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div className="p-4 rounded-lg bg-[#FBF9F5] border border-slate-200 space-y-1">
-                      <p className="text-xs text-slate-500">
-                        Hari & Jam Kelas Malam
-                      </p>
+                      <div className="flex items-center justify-between">
+                        <p className="text-xs text-slate-500">
+                          Hari & Jam Kelas Malam
+                        </p>
+                        <span className="text-[11px] font-mono font-semibold text-emerald-900 bg-emerald-100/80 px-2 py-0.5 rounded border border-emerald-200">
+                          Mulai: {enrolledProgram.startDate || enrolledSchedule.startDate || '19 November 2026'}
+                        </span>
+                      </div>
                       <p className="text-sm font-bold text-slate-900 font-mono">
                         {enrolledSchedule.days} ({enrolledSchedule.timeWIB})
                       </p>
@@ -986,56 +2334,349 @@ export default function StudentPortalApp() {
                         {enrolledProgram.kitabReference}
                       </p>
                       <p className="text-xs text-slate-600">
-                        {enrolledProgram.durationWeeks} Pekan ({enrolledProgram.sessionsCount} Pertemuan)
+                        {enrolledProgram.durationWeeks} Pekan ({programMeetings.length || enrolledProgram.sessionsCount} Pertemuan)
                       </p>
                     </div>
 
-                    <div className="p-4 rounded-lg bg-[#FBF9F5] border border-slate-200 space-y-1">
-                      <p className="text-xs text-slate-500">
-                        Biaya Pendidikan Level {enrolledProgram.levelNumber}
-                      </p>
+                    <div
+                      className="p-4 rounded-lg bg-[#FBF9F5] border border-slate-200 space-y-1 cursor-pointer hover:border-emerald-700 transition-colors"
+                      onClick={() => setActiveTab('pembayaran')}
+                      title="Klik untuk membuka rincian pembayaran & cicilan"
+                    >
+                      <div className="flex items-center justify-between">
+                        <p className="text-xs text-slate-500">
+                          Biaya & Sisa Cicilan Level {enrolledProgram.levelNumber}
+                        </p>
+                        <span className={`text-[10px] font-mono font-bold px-1.5 py-0.5 rounded ${
+                          isTuitionFullyPaid ? 'bg-emerald-100 text-emerald-950' : 'bg-amber-100 text-amber-950'
+                        }`}>
+                          {isTuitionFullyPaid ? '✓ Lunas' : `${paidInstallmentsCount}/6 Bulan`}
+                        </span>
+                      </div>
                       <p className="text-sm font-bold text-emerald-900 font-mono tabular-nums">
-                        {formatIDR(enrolledProgram.tuitionIDR)} / Level
+                        {isTuitionFullyPaid ? `${formatIDR(totalTuition)} (Lunas)` : `Sisa: ${formatIDR(remainingTuition)}`}
                       </p>
-                      <p className="text-xs font-mono text-slate-700">
-                        Cicilan 6x: {formatIDR(Math.round(enrolledProgram.tuitionIDR / 6))} / bulan
+                      <p className="text-xs font-mono text-slate-700 flex items-center justify-between">
+                        <span>{isTuitionFullyPaid ? 'Tuntas 100%' : `Sisa ${remainingInstallmentsCount}x (@ ${formatIDR(monthlyInstallment)}/bln)`}</span>
+                        <span className="text-emerald-800 font-semibold underline text-[11px]">Rincian →</span>
                       </p>
                     </div>
                   </div>
 
-                  {/* Interactive Zoom Classroom Access Box */}
-                  <div className="p-5 rounded-xl bg-emerald-950 text-white space-y-4">
-                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                      <div className="space-y-1">
-                        <div className="flex items-center gap-2 text-xs font-mono text-emerald-300">
-                          <Video className="w-4 h-4 shrink-0" />
-                          <span>RUANG KELAS LIVE ZOOM · KHUSUS AKUN PELAJAR</span>
+                  {/* Status Biaya & Sisa Cicilan Quick Banner */}
+                  <div className="p-5 rounded-xl bg-gradient-to-br from-emerald-950 to-slate-900 text-white space-y-4 shadow-sm border border-emerald-900/60">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-emerald-800/60 pb-3">
+                      <div className="flex items-center gap-2.5">
+                        <div className="w-8 h-8 rounded-lg bg-emerald-500/20 text-emerald-300 flex items-center justify-center shrink-0 border border-emerald-500/30">
+                          <CreditCard className="w-4 h-4 text-emerald-300" />
                         </div>
-                        <h3 className="text-base font-semibold text-white">
-                          Tautan Kelas Malam {enrolledProgram.categoryLabel}
-                        </h3>
-                        <p className="text-xs text-emerald-100/90 leading-relaxed">
-                          Ruang Zoom dibuka 15 menit sebelum kelas dimulai (pukul{' '}
-                          <span className="font-mono font-semibold text-white">
-                            19.45 WIB
+                        <div>
+                          <span className="text-[11px] font-mono uppercase tracking-wider text-emerald-400 font-bold block">
+                            INFORMASI BIAYA & STATUS CICILAN BELAJAR
                           </span>
-                          ) setiap hari{' '}
-                          <span className="font-semibold text-white">
-                            {enrolledSchedule.days}
-                          </span>
-                          . Gunakan Nomor Registrasi{' '}
-                          <span className="font-mono text-emerald-300">
-                            {studentRegistration.registrationNumber}
-                          </span>{' '}
-                          sebagai format nama peserta Zoom.
+                          <h4 className="text-sm sm:text-base font-bold text-white">
+                            {enrolledProgram.title}
+                          </h4>
+                        </div>
+                      </div>
+
+                      <span className={`text-xs font-mono font-bold px-3 py-1 rounded-full self-start sm:self-auto ${
+                        isTuitionFullyPaid
+                          ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
+                          : 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
+                      }`}>
+                        {isTuitionFullyPaid ? '✓ BIAYA LUNAS 100%' : `CICILAN BERJALAN (${paidInstallmentsCount} DARI 6 LUNAS)`}
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5 text-xs">
+                      <div className="bg-white/5 p-3 rounded-lg border border-white/10 space-y-1">
+                        <span className="text-slate-400 text-[11px] block">Total Biaya Pendidikan:</span>
+                        <p className="font-mono font-bold text-white text-base">{formatIDR(totalTuition)}</p>
+                        <p className="text-[11px] text-slate-400">Skema cicilan 6x @ {formatIDR(monthlyInstallment)}/bln</p>
+                      </div>
+
+                      <div className="bg-white/5 p-3 rounded-lg border border-white/10 space-y-1">
+                        <span className="text-slate-400 text-[11px] block">Jumlah Sudah Dibayar:</span>
+                        <p className="font-mono font-bold text-emerald-400 text-base">{formatIDR(paidTuition)}</p>
+                        <p className="text-[11px] text-emerald-300/90 font-medium">
+                          {paidInstallmentsCount} dari 6 Cicilan Bulanan
                         </p>
                       </div>
+
+                      <div className="bg-white/5 p-3 rounded-lg border border-white/10 space-y-1">
+                        <span className="text-slate-400 text-[11px] block">Sisa Cicilan Belum Dibayar:</span>
+                        <p className={`font-mono font-extrabold text-base ${isTuitionFullyPaid ? 'text-emerald-300' : 'text-amber-400'}`}>
+                          {isTuitionFullyPaid ? 'Rp 0 (Tuntas)' : formatIDR(remainingTuition)}
+                        </p>
+                        <p className="text-[11px] text-amber-200/90">
+                          {isTuitionFullyPaid ? 'Bebas tanggungan administrasi' : `Tersisa ${remainingInstallmentsCount} kali cicilan lagi`}
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Progress Bar Pelunasan */}
+                    <div className="space-y-1.5 pt-1">
+                      <div className="flex items-center justify-between text-xs text-slate-300">
+                        <span>Progres Pelunasan Biaya Belajar ({paymentProgressPercent}%):</span>
+                        <span className="font-mono text-emerald-400 font-bold">
+                          {formatIDR(paidTuition)} / {formatIDR(totalTuition)}
+                        </span>
+                      </div>
+                      <div className="w-full h-2 bg-slate-800 rounded-full overflow-hidden border border-slate-700">
+                        <div
+                          className="h-full bg-emerald-400 transition-all duration-300"
+                          style={{ width: `${paymentProgressPercent}%` }}
+                        />
+                      </div>
+                    </div>
+
+                    <div className="pt-2 flex flex-col sm:flex-row items-center justify-between gap-3 border-t border-emerald-900/60">
+                      <p className="text-[11px] text-slate-300">
+                        {!isTuitionFullyPaid
+                          ? `Jatuh tempo berikutnya: Cicilan ke-${paidInstallmentsCount + 1} sebesar ${formatIDR(monthlyInstallment)}`
+                          : 'Alhamdulillah, seluruh pembayaran program telah selesai diverifikasi.'}
+                      </p>
                       <button
                         type="button"
-                        onClick={() => setActiveTab('modul')}
-                        className="px-4 py-2.5 text-xs font-semibold text-slate-950 bg-emerald-400 hover:bg-emerald-300 rounded-lg transition-colors whitespace-nowrap shrink-0"
+                        onClick={() => setActiveTab('pembayaran')}
+                        className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-bold text-slate-950 bg-emerald-400 hover:bg-emerald-300 rounded-lg transition-colors cursor-pointer shrink-0"
                       >
-                        Buka Materi & Modul →
+                        <Receipt className="w-3.5 h-3.5" />
+                        <span>Buka Rincian Tagihan & Rekening Pembayaran →</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Interactive Google Meet / Zoom Classroom Access Box — KHUSUS PESERTA RESMI */}
+                  <div className="p-5 sm:p-6 rounded-2xl bg-gradient-to-br from-emerald-950 via-slate-900 to-slate-950 text-white space-y-5 border border-emerald-800/80 shadow-md">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-emerald-800/60 pb-4">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-xl bg-emerald-500/20 text-emerald-300 flex items-center justify-center shrink-0 border border-emerald-500/30 shadow-inner">
+                          <Video className="w-5 h-5 text-emerald-300 animate-pulse" />
+                        </div>
+                        <div>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="text-[11px] font-mono uppercase tracking-wider text-emerald-400 font-bold block">
+                              RUANG KELAS TATAP MUKA ONLINE · LIVE INTERAKTIF
+                            </span>
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-emerald-900/90 text-emerald-200 border border-emerald-700">
+                              {enrolledSchedule.meetingPlatform || 'Google Meet'}
+                            </span>
+                          </div>
+                          <h3 className="text-base sm:text-lg font-bold text-white mt-0.5">
+                            Tautan Kelas Malam {enrolledProgram.title}
+                          </h3>
+                        </div>
+                      </div>
+
+                      <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-mono font-semibold bg-emerald-500/10 text-emerald-300 border border-emerald-500/30 self-start sm:self-auto">
+                        <Lock className="w-3.5 h-3.5 text-emerald-400" />
+                        <span>Privat Khusus Peserta Terdaftar</span>
+                      </span>
+                    </div>
+
+                    {/* Instruksi Jadwal & Format Nama */}
+                    <p className="text-xs text-emerald-100/90 leading-relaxed">
+                      Ruang kelas tatap muka online dibuka <strong>15 menit sebelum perkuliahan dimulai</strong> (pukul <span className="font-mono font-semibold text-white">19.45 WIB</span>) setiap hari <strong className="text-white">{enrolledSchedule.days}</strong> ({enrolledSchedule.timeWIB}). Mohon gunakan format nama akun Zoom/Meet: <span className="font-mono px-1.5 py-0.5 rounded bg-emerald-900/80 text-emerald-200 border border-emerald-700">{studentRegistration.registrationNumber} - {studentAccount?.fullName || studentRegistration.fullName}</span>.
+                    </p>
+
+                    {/* Area Tautan Google Meet / Zoom */}
+                    {enrolledSchedule.meetingLink && enrolledSchedule.meetingLink.trim() ? (
+                      <div className="space-y-3.5 bg-white/5 p-4 sm:p-5 rounded-xl border border-emerald-500/30">
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                          <div className="min-w-0">
+                            <span className="text-[11px] font-mono text-emerald-300 uppercase tracking-wider block font-semibold">
+                              Tautan Resmi {enrolledSchedule.meetingPlatform || 'Google Meet'}:
+                            </span>
+                            <a
+                              href={enrolledSchedule.meetingLink.trim()}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="font-mono text-xs sm:text-sm text-emerald-200 hover:text-white underline truncate block mt-0.5"
+                              title={enrolledSchedule.meetingLink.trim()}
+                            >
+                              {enrolledSchedule.meetingLink.trim()}
+                            </a>
+                          </div>
+
+                          <div className="flex items-center gap-2 shrink-0">
+                            <button
+                              type="button"
+                              onClick={() => handleCopyMeetingLink(enrolledSchedule.meetingLink!.trim())}
+                              className="px-3 py-2 text-xs font-semibold rounded-lg bg-white/10 hover:bg-white/20 text-white border border-white/20 transition-all flex items-center gap-1.5 cursor-pointer"
+                              title="Salin tautan ke clipboard"
+                            >
+                              {copiedMeetingLink ? (
+                                <>
+                                  <Check className="w-3.5 h-3.5 text-emerald-400" />
+                                  <span className="text-emerald-300 font-bold">Tersalin ✓</span>
+                                </>
+                              ) : (
+                                <>
+                                  <Copy className="w-3.5 h-3.5" />
+                                  <span>Salin Link</span>
+                                </>
+                              )}
+                            </button>
+
+                            <a
+                              href={enrolledSchedule.meetingLink.trim()}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="inline-flex items-center gap-2 px-5 py-2.5 text-xs sm:text-sm font-bold text-slate-950 bg-emerald-400 hover:bg-emerald-300 rounded-lg shadow-md hover:shadow-lg transition-all cursor-pointer whitespace-nowrap"
+                            >
+                              <Video className="w-4 h-4 text-slate-950" />
+                              <span>Masuk Ruang Kelas Sekarang</span>
+                              <ExternalLink className="w-3.5 h-3.5" />
+                            </a>
+                          </div>
+                        </div>
+
+                        {/* Catatan Tambahan Pengajar / Meeting Passcode jika ada */}
+                        {enrolledSchedule.meetingNotes && enrolledSchedule.meetingNotes.trim() && (
+                          <div className="pt-3 border-t border-white/10 flex items-start gap-2 text-xs text-amber-200 bg-amber-500/10 p-2.5 rounded-lg border border-amber-500/20">
+                            <span className="font-bold text-amber-300 shrink-0">📌 Catatan / Passcode:</span>
+                            <span className="leading-relaxed">{enrolledSchedule.meetingNotes.trim()}</span>
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      /* Jika Link Belum Diisi oleh Superadmin */
+                      <div className="bg-white/5 p-4 rounded-xl border border-white/10 flex items-start gap-3 text-xs">
+                        <div className="w-8 h-8 rounded-lg bg-amber-500/20 text-amber-300 flex items-center justify-center shrink-0 border border-amber-500/30">
+                          <Clock className="w-4 h-4 text-amber-300" />
+                        </div>
+                        <div className="space-y-1">
+                          <p className="font-semibold text-white">
+                            Tautan {enrolledSchedule.meetingPlatform || 'Google Meet / Zoom'} Sedang Disiapkan
+                          </p>
+                          <p className="text-slate-300 text-[11px] leading-relaxed">
+                            Admin / Pengajar sedang menyiapkan ruang tatap muka online untuk jadwal ini. Tautan resmi akan tampil otomatis di kartu ini menjelang kelas perdana dimulai ({enrolledSchedule.days}, pukul {enrolledSchedule.timeWIB}).
+                          </p>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Tombol Aksi Tambahan */}
+                    <div className="pt-2 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 border-t border-emerald-900/60">
+                      <p className="text-[11px] text-slate-400">
+                        Kendala akses ruang kelas? Hubungi Admin Ma'had via WhatsApp untuk bantuan teknis.
+                      </p>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => setActiveTab('absensi')}
+                          className="px-3.5 py-2 text-xs font-semibold text-emerald-200 bg-emerald-900/60 hover:bg-emerald-900 border border-emerald-700/60 rounded-lg transition-colors flex items-center gap-1.5"
+                        >
+                          <CalendarCheck className="w-3.5 h-3.5" />
+                          <span>Presensi Online ({attendedCount}/{totalMeetingsCount})</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setActiveTab('modul')}
+                          className="px-3.5 py-2 text-xs font-semibold text-white bg-emerald-900/80 hover:bg-emerald-900 border border-emerald-700/60 rounded-lg transition-colors"
+                        >
+                          Modul & Silabus →
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Status Presensi Live Zoom Kelas Malam */}
+                  <div className="p-5 rounded-xl bg-white border border-slate-200 space-y-4 shadow-xs">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-3">
+                      <div className="flex items-center gap-2.5">
+                        <div className="w-8 h-8 rounded-lg bg-emerald-50 text-emerald-800 flex items-center justify-center shrink-0 border border-emerald-200">
+                          <CalendarCheck className="w-4 h-4 text-emerald-800" />
+                        </div>
+                        <div>
+                          <span className="text-[11px] font-mono uppercase tracking-wider text-emerald-800 font-bold block">
+                            PRESENSI PERTEMUAN ONLINE LIVE ZOOM
+                          </span>
+                          <h4 className="text-sm sm:text-base font-bold text-slate-900">
+                            Kehadiran Kelas Santri · Syarat Kelulusan Min. 75%
+                          </h4>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2 self-start sm:self-auto">
+                        <span className={`text-xs font-mono font-bold px-3 py-1 rounded-full ${
+                          isAttendanceQualified
+                            ? 'bg-emerald-100 text-emerald-950 border border-emerald-300'
+                            : 'bg-amber-100 text-amber-950 border border-amber-300'
+                        }`}>
+                          {isAttendanceQualified ? '✓ MEMENUHI SYARAT KELULUSAN' : `KEHADIRAN: ${attendanceRate}% (MIN. 75%)`}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Grid Stats Kehadiran Ringkas */}
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+                      <div className="bg-[#FBF9F5] p-3 rounded-lg border border-slate-200 space-y-0.5">
+                        <span className="text-slate-500 text-[11px] block">Total Pertemuan:</span>
+                        <p className="font-mono font-bold text-slate-900 text-base">{totalMeetingsCount} Sesi</p>
+                        <p className="text-[10px] text-slate-500">{enrolledProgram.durationWeeks} Pekan Belajar</p>
+                      </div>
+                      <div className="bg-emerald-50/70 p-3 rounded-lg border border-emerald-200 space-y-0.5">
+                        <span className="text-emerald-800 text-[11px] block font-medium">Hadir (حاضر):</span>
+                        <p className="font-mono font-bold text-emerald-950 text-base">{attendedCount} Kali</p>
+                        <p className="text-[10px] text-emerald-800">Tercatat di sistem</p>
+                      </div>
+                      <div className="bg-amber-50/70 p-3 rounded-lg border border-amber-200 space-y-0.5">
+                        <span className="text-amber-800 text-[11px] block font-medium">Izin / Sakit:</span>
+                        <p className="font-mono font-bold text-amber-950 text-base">{excusedCount} Kali</p>
+                        <p className="text-[10px] text-amber-800">Dengan udzur</p>
+                      </div>
+                      <div className="bg-slate-50 p-3 rounded-lg border border-slate-200 space-y-0.5">
+                        <span className="text-slate-500 text-[11px] block">Persentase Hadir:</span>
+                        <p className={`font-mono font-bold text-base ${isAttendanceQualified ? 'text-emerald-900' : 'text-amber-800'}`}>
+                          {attendanceRate}%
+                        </p>
+                        <p className="text-[10px] text-slate-500">Standar lulus 75%</p>
+                      </div>
+                    </div>
+
+                    {/* Progress Bar Kehadiran dengan Garis KKM 75% */}
+                    <div className="space-y-1.5 pt-1">
+                      <div className="flex items-center justify-between text-xs text-slate-600">
+                        <span>Capaian Kehadiran Santri ({attendanceRate}%):</span>
+                        <span className="font-mono font-semibold text-slate-900">
+                          {attendedCount} / {totalMeetingsCount} Pertemuan
+                        </span>
+                      </div>
+                      <div className="relative w-full h-2.5 bg-slate-100 rounded-full overflow-hidden border border-slate-200">
+                        <div
+                          className={`h-full transition-all duration-300 ${
+                            isAttendanceQualified ? 'bg-emerald-600' : 'bg-amber-500'
+                          }`}
+                          style={{ width: `${Math.min(attendanceRate, 100)}%` }}
+                        />
+                        <div
+                          className="absolute top-0 bottom-0 w-0.5 bg-rose-500 z-10"
+                          style={{ left: '75%' }}
+                          title="Batas Minimal Kelulusan: 75%"
+                        />
+                      </div>
+                      <div className="flex justify-between text-[10px] text-slate-400 font-mono">
+                        <span>0%</span>
+                        <span className="text-rose-600 font-bold">Target Minimal: 75%</span>
+                        <span>100%</span>
+                      </div>
+                    </div>
+
+                    {/* Action Links & Quick Attendance Button */}
+                    <div className="pt-2 flex flex-col sm:flex-row items-center justify-between gap-3 border-t border-slate-100">
+                      <p className="text-[11px] text-slate-600">
+                        Presensi dibuka setiap jadwal perkuliahan online ({enrolledSchedule.days}, pukul {enrolledSchedule.timeWIB}).
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => setActiveTab('absensi')}
+                        className="w-full sm:w-auto inline-flex items-center justify-center gap-1.5 px-4 py-2 text-xs font-semibold text-white bg-emerald-900 hover:bg-emerald-800 rounded-lg transition-colors cursor-pointer"
+                      >
+                        <CalendarCheck className="w-3.5 h-3.5" />
+                        <span>Buka Halaman Presensi Lengkap →</span>
                       </button>
                     </div>
                   </div>
@@ -1099,21 +2740,849 @@ export default function StudentPortalApp() {
           )}
 
           {/* =====================================================================
+              TAB: ABSENSI & PRESENSI PERTEMUAN ONLINE LIVE ZOOM
+             ===================================================================== */}
+          {activeTab === 'absensi' && (
+            <div className="space-y-8">
+              {/* Absensi Header & Actions */}
+              <div className="bg-white border border-slate-200 rounded-xl p-6 sm:p-8 space-y-6">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-5 border-b border-slate-200">
+                  <div className="space-y-1.5">
+                    <p className="text-xs font-mono uppercase tracking-wider text-emerald-800 font-semibold">
+                      PRESENSI AKADEMIK RESMI · KELAS ONLINE LIVE ZOOM
+                    </p>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h2 className="text-xl font-bold text-slate-900">
+                        Absensi Pertemuan — {enrolledProgram.title}
+                      </h2>
+                      {activeBatchLabel && (
+                        <span className="text-xs px-2.5 py-0.5 rounded-full font-mono font-bold bg-emerald-100 text-emerald-950 border border-emerald-300">
+                          {activeBatchLabel}
+                        </span>
+                      )}
+                      <span className="text-xs px-2 py-0.5 rounded font-mono text-slate-600 bg-slate-100 border border-slate-200">
+                        No. Reg: {currentRegistration.registrationNumber}
+                      </span>
+                      <span className={`text-xs px-2.5 py-0.5 rounded-full font-semibold ${
+                        isAttendanceQualified
+                          ? 'bg-emerald-800 text-white'
+                          : 'bg-amber-100 text-amber-900 border border-amber-300'
+                      }`}>
+                        {isAttendanceQualified ? '✓ Memenuhi Syarat Kelulusan' : '⚠️ Syarat Min. 75%'}
+                      </span>
+                    </div>
+                    <p className="text-xs text-slate-600">
+                      Jadwal: <strong>{enrolledSchedule.days}</strong> pukul <strong>{enrolledSchedule.timeWIB}</strong> · Pengajar: <strong>{enrolledSchedule.instructor}</strong>
+                    </p>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-2.5 shrink-0">
+                    <button
+                      type="button"
+                      onClick={handleDownloadAttendanceReport}
+                      className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors"
+                      title="Unduh rekap bukti presensi santri format teks resmi"
+                    >
+                      <Download className="w-3.5 h-3.5" />
+                      <span>Unduh Rekap (.TXT)</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => window.print()}
+                      className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-slate-700 bg-white border border-slate-300 hover:bg-slate-50 rounded-lg transition-colors"
+                      title="Cetak halaman rekap presensi"
+                    >
+                      <Printer className="w-3.5 h-3.5" />
+                      <span>Cetak</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Academic Attendance Policy Banner */}
+                <div className="p-4 rounded-xl bg-emerald-50/70 border border-emerald-200/90 text-emerald-950 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                  <div className="flex items-start gap-3">
+                    <ShieldAlert className="w-5 h-5 text-emerald-800 shrink-0 mt-0.5" />
+                    <div className="space-y-0.5 text-xs">
+                      <p className="font-semibold text-emerald-900">
+                        Ketentuan Akademik Kehadiran Perkuliahan Tadribul Lughah:
+                      </p>
+                      <p className="text-emerald-900/90 leading-relaxed">
+                        Santri wajib mencapai minimal <strong>75% kehadiran</strong> ({Math.ceil(totalMeetingsCount * 0.75)} dari {totalMeetingsCount} pertemuan) untuk memenuhi prasyarat evaluasi akhir & diterbitkan <strong>Syahadah Kelulusan Resmi Ma’had Al-Bayan</strong>.
+                      </p>
+                    </div>
+                  </div>
+                  <span className="text-xs font-mono font-bold text-emerald-900 bg-white px-3 py-1.5 rounded-lg border border-emerald-200 whitespace-nowrap self-stretch sm:self-auto text-center">
+                    Batas Minimum: 75%
+                  </span>
+                </div>
+
+                {/* 4 Attendance Metrics Cards */}
+                <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 text-xs">
+                  <div className="bg-[#FBF9F5] p-4 rounded-xl border border-slate-200 space-y-1">
+                    <div className="flex items-center justify-between text-slate-500">
+                      <span>Total Pertemuan</span>
+                      <Calendar className="w-4 h-4 text-slate-400" />
+                    </div>
+                    <p className="text-2xl font-bold font-mono text-slate-900">
+                      {totalMeetingsCount}
+                    </p>
+                    <p className="text-[11px] text-slate-500">
+                      {enrolledProgram.durationWeeks} Pekan Kurikulum
+                    </p>
+                  </div>
+
+                  <div className="bg-emerald-50/60 p-4 rounded-xl border border-emerald-200 space-y-1">
+                    <div className="flex items-center justify-between text-emerald-800">
+                      <span>Hadir (حَاضِرٌ)</span>
+                      <CheckCircle2 className="w-4 h-4 text-emerald-700" />
+                    </div>
+                    <p className="text-2xl font-bold font-mono text-emerald-950">
+                      {attendedCount}
+                    </p>
+                    <p className="text-[11px] text-emerald-800">
+                      {attendedCount > 0 ? `${Math.round((attendedCount / totalMeetingsCount) * 100)}% dari total sesi` : 'Belum ada presensi'}
+                    </p>
+                  </div>
+
+                  <div className="bg-amber-50/60 p-4 rounded-xl border border-amber-200 space-y-1">
+                    <div className="flex items-center justify-between text-amber-800">
+                      <span>Izin / Sakit (بِعُذْرٍ)</span>
+                      <Clock className="w-4 h-4 text-amber-700" />
+                    </div>
+                    <p className="text-2xl font-bold font-mono text-amber-950">
+                      {excusedCount}
+                    </p>
+                    <p className="text-[11px] text-amber-800">
+                      {excusedCount > 0 ? `${excusedCount} sesi berhalangan` : 'Nihil udzur'}
+                    </p>
+                  </div>
+
+                  <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-1">
+                    <div className="flex items-center justify-between text-slate-500">
+                      <span>Persentase Kehadiran</span>
+                      <CalendarCheck className="w-4 h-4 text-emerald-800" />
+                    </div>
+                    <p className={`text-2xl font-bold font-mono ${isAttendanceQualified ? 'text-emerald-900' : 'text-amber-800'}`}>
+                      {attendanceRate}%
+                    </p>
+                    <p className="text-[11px] text-slate-500 font-medium">
+                      {isAttendanceQualified ? '✓ Syarat Kelulusan Terpenuhi' : `Kurang ${Math.max(0, 75 - attendanceRate)}% dari standar`}
+                    </p>
+                  </div>
+                </div>
+
+                {/* Progress Bar Kehadiran */}
+                <div className="space-y-1.5 bg-slate-50 p-4 rounded-xl border border-slate-200">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="font-medium text-slate-700">
+                      Progres Kehadiran Perkuliahan Santri:
+                    </span>
+                    <span className="font-mono font-bold text-slate-900">
+                      {attendedCount} dari {totalMeetingsCount} Pertemuan ({attendanceRate}%)
+                    </span>
+                  </div>
+                  <div className="relative w-full h-3 bg-slate-200 rounded-full overflow-hidden border border-slate-300">
+                    <div
+                      className={`h-full transition-all duration-300 ${
+                        isAttendanceQualified ? 'bg-emerald-600' : 'bg-amber-500'
+                      }`}
+                      style={{ width: `${Math.min(attendanceRate, 100)}%` }}
+                    />
+                    <div
+                      className="absolute top-0 bottom-0 w-0.5 bg-rose-500 z-10"
+                      style={{ left: '75%' }}
+                      title="KKM Kehadiran 75%"
+                    />
+                  </div>
+                  <div className="flex justify-between text-[10px] text-slate-500 font-mono">
+                    <span>0%</span>
+                    <span className="text-rose-600 font-bold">Ambang Minimal Syahadah: 75%</span>
+                    <span>100%</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Form Presensi Cepat Santri */}
+              <div className="bg-white border border-slate-200 rounded-xl p-6 sm:p-8 space-y-6">
+                <div className="border-b border-slate-200 pb-4">
+                  <div className="inline-flex items-center gap-1.5 text-xs font-mono uppercase tracking-wider text-emerald-800 font-bold mb-1">
+                    <CalendarCheck className="w-4 h-4 text-emerald-800" />
+                    <span>FORMULIR PRESENSI MANDIRI KELAS LIVE ZOOM</span>
+                  </div>
+                  <h3 className="text-lg font-bold text-slate-900">
+                    Isi / Perbarui Kehadiran Perkuliahan
+                  </h3>
+                  <p className="text-xs text-slate-600 mt-0.5">
+                    Pilih sesi pertemuan yang ingin dicatat, tentukan status kehadiran Anda, dan simpan. Data otomatis tercatat di sistem akademik.
+                  </p>
+                </div>
+
+                {absenSuccessMsg && (
+                  <div className="p-3.5 rounded-lg bg-emerald-50 border border-emerald-300 text-emerald-950 text-xs flex items-center gap-2 animate-in fade-in">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-700 shrink-0" />
+                    <span className="font-medium">{absenSuccessMsg}</span>
+                  </div>
+                )}
+
+                <div className="grid grid-cols-1 md:grid-cols-12 gap-6 items-start">
+                  {/* Select Pertemuan */}
+                  <div className="md:col-span-6 space-y-2">
+                    <label className="block text-xs font-bold text-slate-800">
+                      1. Pilih Pertemuan / Sesi Kelas:
+                    </label>
+                    <select
+                      value={selectedSessionForAbsen}
+                      onChange={(e) => handleSelectSessionForAbsen(parseInt(e.target.value, 10))}
+                      className="w-full px-3.5 py-2.5 text-xs bg-slate-50 border border-slate-300 rounded-lg text-slate-900 focus:outline-none focus:border-emerald-800 focus:bg-white"
+                    >
+                      {programMeetings.map((m) => {
+                        const key = `${(currentRegistration.registrationNumber || '').toUpperCase()}_${enrolledProgram.id}_s${m.sessionNumber}`;
+                        const rec = studentAttendances[key];
+                        const isUnlocked = isAttendanceSessionUnlocked(enrolledProgram.id, m.sessionNumber);
+                        const statusTag = rec ? `[${rec.status.toUpperCase()}]` : isUnlocked ? '[BELUM ABSEN]' : '[TERKUNCI]';
+                        return (
+                          <option key={m.sessionNumber} value={m.sessionNumber}>
+                            Pertemuan {m.sessionNumber} · Pekan {m.pekanNumber} ({m.dateStr}) — {statusTag} {m.title.slice(0, 45)}
+                          </option>
+                        );
+                      })}
+                    </select>
+
+                    {/* Quick Preview of selected meeting */}
+                    {(() => {
+                      const curMeeting = programMeetings.find((m) => m.sessionNumber === selectedSessionForAbsen);
+                      const key = `${(currentRegistration.registrationNumber || '').toUpperCase()}_${enrolledProgram.id}_s${selectedSessionForAbsen}`;
+                      const rec = studentAttendances[key];
+                      const isSelectedSessionUnlocked = isAttendanceSessionUnlocked(enrolledProgram.id, selectedSessionForAbsen);
+                      if (!curMeeting) return null;
+                      return (
+                        <div className="space-y-2">
+                          <div className="p-3 rounded-lg bg-[#FBF9F5] border border-slate-200 text-xs space-y-1">
+                            <div className="flex items-center justify-between">
+                              <span className="font-semibold text-slate-800">
+                                Pertemuan {curMeeting.sessionNumber} (Pekan {curMeeting.pekanNumber})
+                              </span>
+                              {rec ? (
+                                <span className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold ${
+                                  rec.status === 'hadir'
+                                    ? 'bg-emerald-100 text-emerald-950 border border-emerald-300'
+                                    : 'bg-amber-100 text-amber-950 border border-amber-300'
+                                }`}>
+                                  Status: {rec.status.toUpperCase()}
+                                </span>
+                              ) : isSelectedSessionUnlocked ? (
+                                <span className="px-2 py-0.5 rounded text-[10px] font-mono font-medium bg-slate-100 text-slate-600 border border-slate-200">
+                                  Belum Absen
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-amber-100 text-amber-900 border border-amber-300">
+                                  <Lock className="w-3 h-3 text-amber-700" />
+                                  Belum Diizinkan
+                                </span>
+                              )}
+                            </div>
+                            <p className="text-slate-700 font-medium">{curMeeting.title}</p>
+                            {curMeeting.arabicTitle && (
+                              <p className="font-arabic text-emerald-800 text-sm" dir="rtl">
+                                {curMeeting.arabicTitle}
+                              </p>
+                            )}
+                            <p className="text-[11px] text-slate-500">
+                              {curMeeting.dateStr} · {curMeeting.timeWIB}
+                            </p>
+                            {rec?.submittedAt && (
+                              <p className="text-[10px] text-emerald-800 font-mono pt-1 border-t border-slate-200">
+                                Tercatat: {rec.submittedAt} {rec.notes ? `(${rec.notes})` : ''}
+                              </p>
+                            )}
+                          </div>
+
+                          {!isSelectedSessionUnlocked && (
+                            <div className="p-3 rounded-lg bg-amber-50 border border-amber-300 text-amber-950 text-xs flex items-center gap-2">
+                              <Lock className="w-4 h-4 text-amber-700 shrink-0" />
+                              <div className="leading-tight">
+                                <strong className="block font-semibold">Presensi Belum Diizinkan oleh Superadmin:</strong>
+                                <span>Pertemuan ke-{selectedSessionForAbsen} belum dibuka untuk pengisian presensi oleh pengajar. Santri hanya dapat mengisi presensi setelah diizinkan oleh Superadmin.</span>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })()}
+                  </div>
+
+                  {/* Status Selection & Notes */}
+                  <div className="md:col-span-6 space-y-4">
+                    <div>
+                      <label className="block text-xs font-bold text-slate-800 mb-2">
+                        2. Pilih Status Kehadiran:
+                      </label>
+                      <div className="grid grid-cols-3 gap-2.5">
+                        <button
+                          type="button"
+                          onClick={() => setAbsenStatus('hadir')}
+                          className={`p-3 rounded-lg border text-left transition-all ${
+                            absenStatus === 'hadir'
+                              ? 'bg-emerald-50 border-emerald-800 text-emerald-950 ring-2 ring-emerald-800/20'
+                              : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between mb-1">
+                            <span className="text-xs font-bold">🟢 Hadir</span>
+                            {absenStatus === 'hadir' && <Check className="w-3.5 h-3.5 text-emerald-800" />}
+                          </div>
+                          <p className="text-[10px] font-arabic text-emerald-800">حَاضِرٌ</p>
+                          <p className="text-[10px] text-slate-500 mt-1 leading-tight">
+                            Live Zoom aktif
+                          </p>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => setAbsenStatus('izin')}
+                          className={`p-3 rounded-lg border text-left transition-all ${
+                            absenStatus === 'izin'
+                              ? 'bg-amber-50 border-amber-800 text-amber-950 ring-2 ring-amber-800/20'
+                              : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between mb-1">
+                            <span className="text-xs font-bold">🟡 Izin</span>
+                            {absenStatus === 'izin' && <Check className="w-3.5 h-3.5 text-amber-800" />}
+                          </div>
+                          <p className="text-[10px] font-arabic text-amber-800">مُسْتَأْذِنٌ</p>
+                          <p className="text-[10px] text-slate-500 mt-1 leading-tight">
+                            Ada udzur syar’i
+                          </p>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => setAbsenStatus('sakit')}
+                          className={`p-3 rounded-lg border text-left transition-all ${
+                            absenStatus === 'sakit'
+                              ? 'bg-sky-50 border-sky-800 text-sky-950 ring-2 ring-sky-800/20'
+                              : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between mb-1">
+                            <span className="text-xs font-bold">🔵 Sakit</span>
+                            {absenStatus === 'sakit' && <Check className="w-3.5 h-3.5 text-sky-800" />}
+                          </div>
+                          <p className="text-[10px] font-arabic text-sky-800">مَرِيْضٌ</p>
+                          <p className="text-[10px] text-slate-500 mt-1 leading-tight">
+                            Kondisi sakit
+                          </p>
+                        </button>
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-bold text-slate-800 mb-1">
+                        3. Catatan / Alasan Kehadiran:
+                      </label>
+                      <input
+                        type="text"
+                        value={absenNotes}
+                        onChange={(e) => setAbsenNotes(e.target.value)}
+                        placeholder={
+                          absenStatus === 'hadir'
+                            ? 'Contoh: Hadir tepat waktu mengikuti pemaparan materi dari Ustadz'
+                            : 'Contoh: Izin tugas dinas luar kota / sedang flu & istirahat'
+                        }
+                        className="w-full px-3.5 py-2 text-xs bg-slate-50 border border-slate-300 rounded-lg text-slate-900 focus:outline-none focus:border-emerald-800 focus:bg-white"
+                      />
+                    </div>
+
+                    {(() => {
+                      const isSelectedSessionUnlocked = isAttendanceSessionUnlocked(enrolledProgram.id, selectedSessionForAbsen);
+                      const key = `${(currentRegistration.registrationNumber || '').toUpperCase()}_${enrolledProgram.id}_s${selectedSessionForAbsen}`;
+                      const rec = studentAttendances[key];
+
+                      if (!isSelectedSessionUnlocked) {
+                        return (
+                          <button
+                            type="button"
+                            disabled
+                            className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 text-xs font-bold text-slate-400 bg-slate-100 border border-slate-200 rounded-lg cursor-not-allowed select-none shadow-none"
+                            title="Presensi untuk pertemuan ini belum diizinkan oleh Superadmin"
+                          >
+                            <Lock className="w-4 h-4 text-slate-400" />
+                            <span>Presensi Pertemuan {selectedSessionForAbsen} Belum Dibuka Superadmin</span>
+                          </button>
+                        );
+                      }
+
+                      return (
+                        <button
+                          type="button"
+                          onClick={() => handleOpenAttendanceModal(selectedSessionForAbsen)}
+                          className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 text-xs font-bold text-white bg-emerald-900 hover:bg-emerald-800 rounded-lg transition-colors cursor-pointer shadow-xs"
+                        >
+                          <CalendarClock className="w-4 h-4" />
+                          <span>
+                            Buka Popup Presensi Pertemuan {selectedSessionForAbsen} ({rec ? 'Ubah Status' : 'Isi Absen'})
+                          </span>
+                        </button>
+                      );
+                    })()}
+                  </div>
+                </div>
+              </div>
+
+              {/* Daftar Seluruh Pertemuan Online */}
+              <div className="bg-white border border-slate-200 rounded-xl p-6 sm:p-8 space-y-6">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-200">
+                  <div>
+                    <h3 className="text-lg font-bold text-slate-900">
+                      Daftar Riwayat Presensi Seluruh Pertemuan ({programMeetings.length} Sesi)
+                    </h3>
+                    <p className="text-xs text-slate-600 mt-0.5">
+                      Rincian presensi kehadiran kelas online live Zoom per pertemuan kurikulum.
+                    </p>
+                  </div>
+
+                  {/* Filter Pills */}
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => setAttendanceFilter('semua')}
+                      className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors ${
+                        attendanceFilter === 'semua'
+                          ? 'bg-slate-900 text-white font-semibold'
+                          : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                      }`}
+                    >
+                      Semua ({totalMeetingsCount})
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setAttendanceFilter('hadir')}
+                      className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors ${
+                        attendanceFilter === 'hadir'
+                          ? 'bg-emerald-900 text-white font-semibold'
+                          : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                      }`}
+                    >
+                      🟢 Hadir ({attendedCount})
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setAttendanceFilter('izin-sakit')}
+                      className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors ${
+                        attendanceFilter === 'izin-sakit'
+                          ? 'bg-amber-900 text-white font-semibold'
+                          : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                      }`}
+                    >
+                      🟡 Izin & Sakit ({excusedCount})
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setAttendanceFilter('belum')}
+                      className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors ${
+                        attendanceFilter === 'belum'
+                          ? 'bg-slate-700 text-white font-semibold'
+                          : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                      }`}
+                    >
+                      ⚪ Belum Absen ({unattendedCount})
+                    </button>
+                  </div>
+                </div>
+
+                {/* Table View */}
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left border-collapse">
+                    <thead>
+                      <tr className="border-b border-slate-200 text-[11px] font-semibold text-slate-500 uppercase tracking-wider font-mono">
+                        <th className="py-3 pr-4">Sesi & Pekan</th>
+                        <th className="py-3 px-4">Topik Pembelajaran</th>
+                        <th className="py-3 px-4">Jadwal Perkuliahan</th>
+                        <th className="py-3 px-4">Status Presensi</th>
+                        <th className="py-3 px-4">Catatan Santri</th>
+                        <th className="py-3 pl-4 text-right">Aksi</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-200 text-xs">
+                      {programMeetings
+                        .filter((m) => {
+                          const key = `${(currentRegistration.registrationNumber || '').toUpperCase()}_${enrolledProgram.id}_s${m.sessionNumber}`;
+                          const rec = studentAttendances[key];
+                          if (attendanceFilter === 'hadir') return rec?.status === 'hadir';
+                          if (attendanceFilter === 'izin-sakit') return rec?.status === 'izin' || rec?.status === 'sakit';
+                          if (attendanceFilter === 'belum') return !rec;
+                          return true;
+                        })
+                        .map((m) => {
+                          const key = `${(currentRegistration.registrationNumber || '').toUpperCase()}_${enrolledProgram.id}_s${m.sessionNumber}`;
+                          const rec = studentAttendances[key];
+                          return (
+                            <tr key={m.sessionNumber} className="hover:bg-slate-50 transition-colors">
+                              <td className="py-4 pr-4 whitespace-nowrap">
+                                <span className="font-mono font-bold text-slate-900 block">
+                                  Pertemuan {String(m.sessionNumber).padStart(2, '0')}
+                                </span>
+                                <span className="text-[11px] font-mono text-emerald-800">
+                                  Pekan {m.pekanNumber}
+                                </span>
+                              </td>
+
+                              <td className="py-4 px-4 max-w-xs">
+                                <p className="font-semibold text-slate-900 leading-snug">
+                                  {m.title}
+                                </p>
+                                {m.arabicTitle && (
+                                  <p className="font-arabic text-emerald-800 text-sm mt-0.5" dir="rtl">
+                                    {m.arabicTitle}
+                                  </p>
+                                )}
+                                {m.category && (
+                                  <span className="inline-block mt-1 text-[10px] text-slate-500 font-mono">
+                                    {m.category}
+                                  </span>
+                                )}
+                              </td>
+
+                              <td className="py-4 px-4 whitespace-nowrap">
+                                <p className="font-medium text-slate-800">
+                                  {m.dateStr}
+                                </p>
+                                <p className="text-slate-500 text-[11px] font-mono mt-0.5">
+                                  {m.timeWIB}
+                                </p>
+                              </td>
+
+                              <td className="py-4 px-4 whitespace-nowrap">
+                                {rec ? (
+                                  <div className="space-y-0.5">
+                                    <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold ${
+                                      rec.status === 'hadir'
+                                        ? 'bg-emerald-100 text-emerald-950 border border-emerald-300'
+                                        : rec.status === 'izin'
+                                          ? 'bg-amber-100 text-amber-950 border border-amber-300'
+                                          : 'bg-sky-100 text-sky-950 border border-sky-300'
+                                    }`}>
+                                      {rec.status === 'hadir' ? '🟢 Hadir' : rec.status === 'izin' ? '🟡 Izin' : '🔵 Sakit'}
+                                    </span>
+                                    {rec.submittedAt && (
+                                      <p className="text-[10px] text-slate-400 font-mono">
+                                        {rec.submittedAt}
+                                      </p>
+                                    )}
+                                  </div>
+                                ) : isAttendanceSessionUnlocked(enrolledProgram.id, m.sessionNumber) ? (
+                                  <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-medium bg-slate-100 text-slate-600 border border-slate-200">
+                                    ⚪ Belum Absen
+                                  </span>
+                                ) : (
+                                  <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-amber-50 text-amber-900 border border-amber-300 shadow-2xs">
+                                    <Lock className="w-3 h-3 text-amber-700" />
+                                    Belum Diizinkan
+                                  </span>
+                                )}
+                              </td>
+
+                              <td className="py-4 px-4 text-slate-600 text-[11px] max-w-[200px] truncate">
+                                {rec?.notes || '-'}
+                              </td>
+
+                              <td className="py-4 pl-4 text-right whitespace-nowrap">
+                                {isAttendanceSessionUnlocked(enrolledProgram.id, m.sessionNumber) ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleOpenAttendanceModal(m.sessionNumber)}
+                                    className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition-all cursor-pointer shadow-2xs ${
+                                      rec
+                                        ? 'bg-slate-100 hover:bg-emerald-50 text-slate-700 hover:text-emerald-900 border border-slate-200'
+                                        : 'bg-emerald-900 hover:bg-emerald-800 text-white shadow-xs'
+                                    }`}
+                                    title={rec ? 'Klik untuk mengubah status presensi pertemuan ini' : 'Klik untuk mengisi presensi pertemuan ini'}
+                                  >
+                                    <CalendarClock className="w-3.5 h-3.5" />
+                                    <span>{rec ? 'Ubah Status' : 'Isi Absen'}</span>
+                                  </button>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    disabled
+                                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed select-none"
+                                    title="Pengisian presensi pertemuan ini belum diizinkan oleh Superadmin / Pengajar"
+                                  >
+                                    <Lock className="w-3.5 h-3.5 text-slate-400" />
+                                    <span>{rec ? 'Terkunci' : 'Belum Dibuka'}</span>
+                                  </button>
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* =====================================================================
+                  POPUP / MODAL FORMULIR PRESENSI SANTRI
+                 ===================================================================== */}
+              {isAttendanceModalOpen && attendanceTargetSession !== null && (() => {
+                const targetMeeting = programMeetings.find((m) => m.sessionNumber === attendanceTargetSession);
+                if (!targetMeeting) return null;
+                const key = `${(currentRegistration.registrationNumber || '').toUpperCase()}_${enrolledProgram.id}_s${attendanceTargetSession}`;
+                const existingRecord = studentAttendances[key];
+
+                return (
+                  <div
+                    role="dialog"
+                    aria-modal="true"
+                    className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6 bg-slate-950/75 backdrop-blur-xs overflow-y-auto animate-in fade-in duration-150"
+                    onClick={(e) => {
+                      if (e.target === e.currentTarget) setIsAttendanceModalOpen(false);
+                    }}
+                  >
+                    <div className="bg-white border border-slate-200 rounded-2xl max-w-lg w-full max-h-[92vh] overflow-y-auto shadow-2xl flex flex-col my-auto animate-in zoom-in-95 duration-150">
+                      {/* Modal Header */}
+                      <div className="p-5 sm:p-6 bg-gradient-to-r from-emerald-950 via-slate-900 to-slate-950 text-white border-b border-slate-800 flex items-start justify-between gap-4 sticky top-0 z-10 shadow-sm">
+                        <div className="flex items-center gap-3">
+                          <div className="w-10 h-10 rounded-xl bg-emerald-500/20 text-emerald-300 flex items-center justify-center shrink-0 border border-emerald-500/30">
+                            <CalendarCheck className="w-5 h-5 text-emerald-300" />
+                          </div>
+                          <div>
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="text-[11px] font-mono uppercase tracking-wider text-emerald-400 font-bold">
+                                PRESENSI KELAS LIVE ZOOM
+                              </span>
+                              <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-emerald-900 text-emerald-200 border border-emerald-700">
+                                Pertemuan {String(targetMeeting.sessionNumber).padStart(2, '0')}
+                              </span>
+                            </div>
+                            <h3 className="text-base sm:text-lg font-bold text-white mt-0.5">
+                              {existingRecord ? 'Ubah Status Presensi' : 'Isi Presensi Kehadiran'}
+                            </h3>
+                          </div>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => setIsAttendanceModalOpen(false)}
+                          className="p-1.5 text-slate-400 hover:text-white hover:bg-white/10 rounded-lg transition-colors cursor-pointer"
+                          title="Tutup Popup"
+                        >
+                          <X className="w-5 h-5" />
+                        </button>
+                      </div>
+
+                      {/* Modal Body */}
+                      <div className="p-5 sm:p-6 space-y-5 text-slate-800 text-xs sm:text-sm leading-relaxed flex-1">
+                        {/* Card Rincian Pertemuan */}
+                        <div className="p-4 rounded-xl bg-[#FBF9F5] border border-slate-200 space-y-2">
+                          <div className="flex items-center justify-between text-xs">
+                            <span className="font-mono text-emerald-800 font-bold">
+                              Pekan ke-{targetMeeting.pekanNumber} · Pertemuan {targetMeeting.sessionNumber}
+                            </span>
+                            <span className="text-slate-500 font-mono text-[11px]">
+                              {targetMeeting.dateStr} · {targetMeeting.timeWIB}
+                            </span>
+                          </div>
+
+                          <p className="font-bold text-slate-900 text-sm leading-snug">
+                            {targetMeeting.title}
+                          </p>
+                          {targetMeeting.arabicTitle && (
+                            <p className="font-arabic text-emerald-800 text-base" dir="rtl">
+                              {targetMeeting.arabicTitle}
+                            </p>
+                          )}
+
+                          {/* Status Sebelumnya */}
+                          <div className="pt-2 border-t border-slate-200/70 flex flex-wrap items-center justify-between gap-2 text-xs">
+                            <span className="text-slate-500 text-[11px]">Status Saat Ini:</span>
+                            {existingRecord ? (
+                              <div className="flex items-center gap-1.5">
+                                <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold ${
+                                  existingRecord.status === 'hadir'
+                                    ? 'bg-emerald-100 text-emerald-950 border border-emerald-300'
+                                    : existingRecord.status === 'izin'
+                                      ? 'bg-amber-100 text-amber-950 border border-amber-300'
+                                      : 'bg-sky-100 text-sky-950 border border-sky-300'
+                                }`}>
+                                  {existingRecord.status === 'hadir' ? '🟢 Hadir' : existingRecord.status === 'izin' ? '🟡 Izin' : '🔵 Sakit'}
+                                </span>
+                                {existingRecord.submittedAt && (
+                                  <span className="text-[10px] font-mono text-slate-400">
+                                    ({existingRecord.submittedAt})
+                                  </span>
+                                )}
+                              </div>
+                            ) : (
+                              <span className="px-2.5 py-0.5 rounded-full text-[10px] font-medium bg-slate-100 text-slate-600 border border-slate-200">
+                                ⚪ Belum Pernah Mengisi
+                              </span>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Pilihan Status Kehadiran (3 Card Besar) */}
+                        <div className="space-y-2">
+                          <label className="block text-xs font-bold text-slate-800">
+                            Pilih Status Kehadiran Anda:
+                          </label>
+                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                            <button
+                              type="button"
+                              onClick={() => setModalAbsenStatus('hadir')}
+                              className={`p-3.5 rounded-xl border text-left transition-all cursor-pointer ${
+                                modalAbsenStatus === 'hadir'
+                                  ? 'bg-emerald-50 border-emerald-700 text-emerald-950 ring-2 ring-emerald-700/30 shadow-xs'
+                                  : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
+                              }`}
+                            >
+                              <div className="flex items-center justify-between mb-1">
+                                <span className="text-xs font-bold">🟢 Hadir</span>
+                                {modalAbsenStatus === 'hadir' && <Check className="w-4 h-4 text-emerald-800" />}
+                              </div>
+                              <p className="text-xs font-arabic text-emerald-800 font-semibold">حَاضِرٌ</p>
+                              <p className="text-[10px] text-slate-500 mt-1 leading-tight">
+                                Mengikuti Live Zoom aktif
+                              </p>
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => setModalAbsenStatus('izin')}
+                              className={`p-3.5 rounded-xl border text-left transition-all cursor-pointer ${
+                                modalAbsenStatus === 'izin'
+                                  ? 'bg-amber-50 border-amber-700 text-amber-950 ring-2 ring-amber-700/30 shadow-xs'
+                                  : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
+                              }`}
+                            >
+                              <div className="flex items-center justify-between mb-1">
+                                <span className="text-xs font-bold">🟡 Izin</span>
+                                {modalAbsenStatus === 'izin' && <Check className="w-4 h-4 text-amber-800" />}
+                              </div>
+                              <p className="text-xs font-arabic text-amber-800 font-semibold">مُسْتَأْذِنٌ</p>
+                              <p className="text-[10px] text-slate-500 mt-1 leading-tight">
+                                Ada udzur / berhalangan
+                              </p>
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => setModalAbsenStatus('sakit')}
+                              className={`p-3.5 rounded-xl border text-left transition-all cursor-pointer ${
+                                modalAbsenStatus === 'sakit'
+                                  ? 'bg-sky-50 border-sky-700 text-sky-950 ring-2 ring-sky-700/30 shadow-xs'
+                                  : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
+                              }`}
+                            >
+                              <div className="flex items-center justify-between mb-1">
+                                <span className="text-xs font-bold">🔵 Sakit</span>
+                                {modalAbsenStatus === 'sakit' && <Check className="w-4 h-4 text-sky-800" />}
+                              </div>
+                              <p className="text-xs font-arabic text-sky-800 font-semibold">مَرِيْضٌ</p>
+                              <p className="text-[10px] text-slate-500 mt-1 leading-tight">
+                                Kondisi fisik sedang sakit
+                              </p>
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Catatan / Alasan Kehadiran */}
+                        <div className="space-y-1.5">
+                          <label className="block text-xs font-bold text-slate-800">
+                            Catatan / Keterangan Santri (Opsional):
+                          </label>
+                          <input
+                            type="text"
+                            value={modalAbsenNotes}
+                            onChange={(e) => setModalAbsenNotes(e.target.value)}
+                            placeholder={
+                              modalAbsenStatus === 'hadir'
+                                ? 'Contoh: Hadir tepat waktu mengikuti pemaparan materi dari Ustadz'
+                                : modalAbsenStatus === 'izin'
+                                  ? 'Contoh: Izin ada tugas kantor luar kota / acara keluarga'
+                                  : 'Contoh: Sedang demam & flu, istirahat di rumah'
+                            }
+                            className="w-full px-3.5 py-2.5 text-xs bg-slate-50 border border-slate-300 rounded-lg text-slate-900 focus:outline-none focus:border-emerald-800 focus:bg-white"
+                          />
+                        </div>
+
+                        {/* Info Syarat Kelulusan */}
+                        <div className="p-3 bg-emerald-50/70 border border-emerald-200 rounded-xl text-[11px] text-emerald-950 flex items-start gap-2">
+                          <GraduationCap className="w-4 h-4 text-emerald-800 shrink-0 mt-0.5" />
+                          <p className="leading-relaxed">
+                            <strong>Standar Kelulusan Akademik:</strong> Santri diwajibkan memenuhi minimal <strong>75% kehadiran</strong> kelas Live Zoom untuk dapat mengikuti evaluasi akhir dan memperoleh sertifikat resmi.
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Modal Footer Actions */}
+                      <div className="p-4 sm:p-5 bg-slate-50 border-t border-slate-200 flex items-center justify-end gap-2.5 sticky bottom-0">
+                        <button
+                          type="button"
+                          onClick={() => setIsAttendanceModalOpen(false)}
+                          className="px-4 py-2.5 text-xs font-semibold text-slate-700 bg-white border border-slate-300 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
+                        >
+                          Batal
+                        </button>
+                        <button
+                          type="button"
+                          disabled={!isAttendanceSessionUnlocked(enrolledProgram.id, targetMeeting.sessionNumber)}
+                          onClick={handleSaveAttendanceFromModal}
+                          className="inline-flex items-center gap-2 px-5 py-2.5 text-xs font-bold text-white bg-emerald-900 hover:bg-emerald-800 disabled:bg-slate-300 disabled:text-slate-500 disabled:cursor-not-allowed rounded-lg transition-colors shadow-sm cursor-pointer"
+                        >
+                          <CheckCircle2 className="w-4 h-4" />
+                          <span>
+                            {isAttendanceSessionUnlocked(enrolledProgram.id, targetMeeting.sessionNumber)
+                              ? `Simpan Presensi Pertemuan ${targetMeeting.sessionNumber} (${modalAbsenStatus.toUpperCase()})`
+                              : `Presensi Pertemuan ${targetMeeting.sessionNumber} Belum Diizinkan`}
+                          </span>
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
+            </div>
+          )}
+
+          {/* =====================================================================
               TAB 2: PROGRES MODUL & KURIKULUM LEVEL PELAJAR
              ===================================================================== */}
           {activeTab === 'modul' && (
             <div className="space-y-8">
               <div className="bg-white border border-slate-200 rounded-xl p-6 sm:p-8 space-y-6">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-5 border-b border-slate-200">
-                  <div>
+                  <div className="space-y-1.5">
                     <p className="text-xs font-mono uppercase tracking-wider text-emerald-800 font-semibold">
                       SILABUS & CEKLIS CAPAIAN BELAJAR MANDIRI
                     </p>
-                    <h2 className="text-xl font-bold text-slate-900 mt-1">
-                      Modul {enrolledProgram.title}
-                    </h2>
-                    <p className="text-xs text-slate-600 mt-1">
-                      Klik tombol pada setiap pekan untuk menandai materi yang sudah Anda kuasai di kelas malam ({enrolledSchedule.days}, {enrolledSchedule.timeWIB}).
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h2 className="text-xl font-bold text-slate-900">
+                        Modul {enrolledProgram.title}
+                      </h2>
+                      {activeBatchLabel && (
+                        <span className="text-xs px-2.5 py-0.5 rounded-full font-mono font-bold bg-emerald-100 text-emerald-950 border border-emerald-300">
+                          {activeBatchLabel}
+                        </span>
+                      )}
+                      <span className="text-xs px-2 py-0.5 rounded font-mono text-slate-600 bg-slate-100 border border-slate-200">
+                        No. Reg: {currentRegistration.registrationNumber}
+                      </span>
+                      {isBatchGraduated ? (
+                        <span className="text-xs px-2.5 py-0.5 rounded font-semibold bg-emerald-800 text-emerald-50">
+                          ✓ Lulus & Selesai
+                        </span>
+                      ) : (
+                        <span className="text-xs px-2.5 py-0.5 rounded font-semibold bg-amber-100 text-amber-900 border border-amber-300">
+                          Sedang Berjalan (Angkatan Baru)
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-xs text-slate-600">
+                      {isBatchGraduated
+                        ? 'Alhamdulillah, Anda telah menyelesaikan seluruh rangkaian materi dan ujian mandiri pada angkatan ini. Riwayat kelulusan Anda tersimpan rapi.'
+                        : `Klik tombol pada setiap pekan untuk menandai materi yang sudah Anda kuasai di kelas ${enrolledSchedule.days} (${enrolledSchedule.timeWIB}). Anda dapat belajar mandiri dari awal lagi untuk angkatan baru ini.`}
                     </p>
                   </div>
                   <div className="text-xs font-mono font-semibold text-emerald-900 bg-emerald-50 border border-emerald-200 px-3.5 py-2 rounded-lg shrink-0">
@@ -1121,11 +3590,148 @@ export default function StudentPortalApp() {
                   </div>
                 </div>
 
+                {/* Pelajaran Mendengar (Istima') - Audio Google Drive (Level 1 / Program dengan Audio) */}
+                {(() => {
+                  // Trigger re-render when materi overrides or unlock state update
+                  void materiVersion;
+                  void pekanUnlockVersion;
+                  const maxAudioPekan = enrolledProgram.id === 'tl-level-1' ? 22 : enrolledProgram.modules.length;
+                  const pekanAudioEntries = Array.from({ length: maxAudioPekan }, (_, i) => {
+                    const pNum = i + 1;
+                    const pContent = getWeeklyPekanContent(enrolledProgram.id, pNum, enrolledSchedule?.id);
+                    const audioItems = getNormalizedPekanAudioItems(pContent);
+                    return {
+                      pekanNum: pNum,
+                      title: pContent.title,
+                      arabicTitle: pContent.arabicTitle,
+                      audioItems,
+                      isUnlocked: isPekanUnlocked(enrolledProgram.id, pNum, enrolledSchedule?.id)
+                    };
+                  });
+                  const totalAudioTracks = pekanAudioEntries.reduce(
+                    (sum, entry) => sum + entry.audioItems.length,
+                    0
+                  );
+
+                  if (enrolledProgram.id !== 'tl-level-1' && totalAudioTracks === 0) {
+                    return null;
+                  }
+
+                  const activeAudioEntry =
+                    pekanAudioEntries.find((e) => e.pekanNum === selectedAudioPekan) ||
+                    pekanAudioEntries[0];
+
+                  return (
+                    <div className="rounded-2xl border-2 border-emerald-200 bg-gradient-to-br from-emerald-50/80 via-[#FBF9F5] to-white p-5 sm:p-6 space-y-4">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                        <div className="flex items-start gap-3">
+                          <div className="w-10 h-10 rounded-xl bg-emerald-900 text-amber-300 flex items-center justify-center shrink-0 shadow-sm">
+                            <Headphones className="w-5 h-5" />
+                          </div>
+                          <div>
+                            <div className="flex flex-wrap items-center gap-2">
+                              <h3 className="font-serif text-lg sm:text-xl font-bold text-slate-900">
+                                Pelajaran Mendengar (Istima&apos;)
+                              </h3>
+                              <span className="font-arabic text-base font-bold text-emerald-900">
+                                دَرْسُ الاسْتِمَاعِ
+                              </span>
+                            </div>
+                            <p className="text-xs text-slate-600 mt-0.5">
+                              Dengarkan rekaman audio pelajaran Bahasa Arab (sumber Google Drive) sesuai pekan pembelajaran {enrolledProgram.title}.
+                            </p>
+                          </div>
+                        </div>
+                        <span className="text-[11px] font-mono font-bold px-3 py-1.5 rounded-lg bg-white border border-emerald-200 text-emerald-900 shrink-0 self-start sm:self-center">
+                          {totalAudioTracks > 0
+                            ? `${totalAudioTracks} Audio Tersedia`
+                            : 'Menunggu Upload Audio'}
+                        </span>
+                      </div>
+
+                      {/* Pilihan Pekan Audio */}
+                      <div className="flex items-center gap-2 overflow-x-auto pb-1">
+                        {pekanAudioEntries.map((entry) => {
+                          const isSelected = activeAudioEntry?.pekanNum === entry.pekanNum;
+                          const hasAudio = entry.audioItems.length > 0;
+                          return (
+                            <button
+                              key={entry.pekanNum}
+                              type="button"
+                              onClick={() => setSelectedAudioPekan(entry.pekanNum)}
+                              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border whitespace-nowrap transition-all shrink-0 ${
+                                isSelected
+                                  ? 'bg-emerald-900 text-white border-emerald-900 shadow-sm'
+                                  : hasAudio
+                                    ? 'bg-white text-emerald-950 border-emerald-300 hover:bg-emerald-50'
+                                    : 'bg-slate-50 text-slate-500 border-slate-200 hover:bg-slate-100'
+                              }`}
+                            >
+                              {!entry.isUnlocked && <Lock className="w-3 h-3 shrink-0 opacity-75" />}
+                              <span>Pekan {entry.pekanNum}</span>
+                              {hasAudio && (
+                                <span
+                                  className={`px-1.5 py-0.5 rounded text-[10px] font-mono ${
+                                    isSelected
+                                      ? 'bg-amber-400 text-slate-950 font-bold'
+                                      : 'bg-emerald-100 text-emerald-900'
+                                  }`}
+                                >
+                                  {entry.audioItems.length}
+                                </span>
+                              )}
+                            </button>
+                          );
+                        })}
+                      </div>
+
+                      {/* Pemutar Audio Pekan Terpilih */}
+                      {activeAudioEntry && (
+                        <div className="space-y-2">
+                          <div className="flex items-center justify-between gap-2 text-xs text-slate-700">
+                            <span className="font-semibold text-emerald-950">
+                              Pekan {activeAudioEntry.pekanNum}: {activeAudioEntry.title}
+                            </span>
+                            {activeAudioEntry.arabicTitle && (
+                              <span dir="rtl" className="font-arabic font-bold text-emerald-900">
+                                {activeAudioEntry.arabicTitle}
+                              </span>
+                            )}
+                          </div>
+
+                          {!activeAudioEntry.isUnlocked ? (
+                            <div className="p-4 rounded-xl bg-amber-50 border border-amber-200 text-amber-950 text-xs flex items-center gap-2.5">
+                              <Lock className="w-4 h-4 shrink-0 text-amber-700" />
+                              <span>
+                                Audio pelajaran mendengar untuk <strong>Pekan {activeAudioEntry.pekanNum}</strong> saat ini masih dikunci oleh Asatidz/Superadmin. Audio akan otomatis aktif saat pekan ini dibuka.
+                              </span>
+                            </div>
+                          ) : (
+                            <GoogleDriveAudioPlayer
+                              items={activeAudioEntry.audioItems}
+                              pekanNumber={activeAudioEntry.pekanNum}
+                            />
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
+
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                   {enrolledProgram.modules.map((mod, idx) => {
-                    const isDone = studentAccount.completedModuleKeys.includes(
-                      `${enrolledProgram.id}-${idx}`
+                    const pekanNum = getModulePekanNumber(mod.weekRange, idx);
+                    const isUnlocked = isPekanUnlocked(enrolledProgram.id, pekanNum, enrolledSchedule?.id);
+                    const scoreKey = `${enrolledProgram.id}-pekan-${pekanNum}`;
+                    const status = isPekanExamAlreadySubmitted(
+                      studentAccount?.email || studentAccount?.registrationNumber || '',
+                      scoreKey,
+                      currentRegistration.registrationNumber
                     );
+                    const quizScore = status.score;
+                    const isDone =
+                      isModuleDoneForCurrentRegistration(idx, pekanNum) ||
+                      (status.submitted && (status.score ?? 0) >= 70);
                     return (
                       <div
                         key={mod.weekRange}
@@ -1136,15 +3742,28 @@ export default function StudentPortalApp() {
                         }`}
                       >
                         <div
-                          className="space-y-2.5 cursor-pointer"
+                          className={`space-y-2.5 ${
+                            !isUnlocked ? 'cursor-not-allowed opacity-90' : 'cursor-pointer'
+                          }`}
                           onClick={() => {
-                            window.location.href = `./materi.html?program=${encodeURIComponent(enrolledProgram.id)}&pekan=${idx * 3 + 1}`;
+                            if (!isUnlocked) {
+                              showToast(`Materi untuk ${mod.weekRange} (${enrolledSchedule.batchCode}) saat ini masih OFF / dikunci oleh Asatidz. Akses akan dibuka sesuai jadwal kelas Zoom Anda.`);
+                              return;
+                            }
+                            window.location.href = `./materi.html?program=${encodeURIComponent(enrolledProgram.id)}&pekan=${pekanNum}&schedule=${encodeURIComponent(enrolledSchedule.id)}`;
                           }}
                         >
                           <div className="flex items-center justify-between gap-2">
-                            <span className="text-xs font-mono font-semibold text-emerald-900 bg-emerald-100/80 px-2 py-0.5 rounded">
-                              {mod.weekRange}
-                            </span>
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-xs font-mono font-semibold text-emerald-900 bg-emerald-100/80 px-2 py-0.5 rounded">
+                                {mod.weekRange}
+                              </span>
+                              {!isUnlocked && (
+                                <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded bg-amber-100 text-amber-900 border border-amber-300">
+                                  🔒 Belum Dibuka
+                                </span>
+                              )}
+                            </div>
                             <span
                               className="font-arabic text-base font-semibold text-slate-800"
                               dir="rtl"
@@ -1154,30 +3773,93 @@ export default function StudentPortalApp() {
                           </div>
                           <h3 className="text-sm font-bold text-slate-900 leading-snug hover:text-emerald-900 transition-colors flex items-center justify-between gap-2">
                             <span>{mod.topic}</span>
-                            <span className="text-xs font-mono text-emerald-800 font-semibold flex items-center gap-1">
-                              <span>Buka Halaman (materi.html)</span>
-                              <Eye className="w-3.5 h-3.5 shrink-0" />
-                            </span>
+                            {!isUnlocked ? (
+                              <span className="text-xs font-mono text-amber-800 font-semibold flex items-center gap-1 bg-amber-50 px-2 py-0.5 rounded border border-amber-200">
+                                <Lock className="w-3.5 h-3.5 shrink-0" />
+                                <span>Materi Terkunci</span>
+                              </span>
+                            ) : (
+                              <span className="text-xs font-mono text-emerald-800 font-semibold flex items-center gap-1">
+                                <span>Buka Halaman (materi.html)</span>
+                                <Eye className="w-3.5 h-3.5 shrink-0" />
+                              </span>
+                            )}
                           </h3>
                           <p className="text-xs text-slate-600 leading-relaxed">
                             Target: {mod.outcome}
                           </p>
+
+                          {quizScore !== undefined ? (
+                            <div className="pt-1 flex items-center gap-2 text-[11px] font-mono">
+                              <a
+                                href={`./latihan.html?program=${encodeURIComponent(enrolledProgram.id)}&pekan=${pekanNum}&schedule=${encodeURIComponent(enrolledSchedule.id)}&reg=${encodeURIComponent(currentRegistration.registrationNumber)}`}
+                                onClick={(e) => e.stopPropagation()}
+                                className={`px-2.5 py-1 rounded-md font-bold flex items-center gap-1.5 border transition-all ${
+                                  quizScore >= 70
+                                    ? 'bg-emerald-100 text-emerald-950 border-emerald-300 hover:bg-emerald-200'
+                                    : 'bg-rose-100 text-rose-950 border-rose-300 hover:bg-rose-200'
+                                }`}
+                                title="Buka rapor dan evaluasi jawaban di latihan.html"
+                              >
+                                <span>Nilai Latihan:</span>
+                                <span className="font-extrabold">{quizScore} / 100</span>
+                                <span>{quizScore >= 70 ? '✓ Lulus' : '✕ Belum KKM'}</span>
+                                <span className="underline ml-1">Rapor →</span>
+                              </a>
+                            </div>
+                          ) : !isUnlocked ? (
+                            <div className="pt-1 flex items-center gap-2 text-[11px] font-mono">
+                              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded font-semibold text-slate-400 bg-slate-100 border border-slate-200" title="Ujian latihan pekan ini belum dibuka oleh Asatidz">
+                                <span>🔒 Ujian Mandiri Belum Dibuka</span>
+                              </span>
+                            </div>
+                          ) : (
+                            <div className="pt-1 flex items-center gap-2 text-[11px] font-mono">
+                              <a
+                                href={`./latihan.html?program=${encodeURIComponent(enrolledProgram.id)}&pekan=${pekanNum}&schedule=${encodeURIComponent(enrolledSchedule.id)}&reg=${encodeURIComponent(currentRegistration.registrationNumber)}`}
+                                onClick={(e) => e.stopPropagation()}
+                                className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded font-bold text-amber-900 bg-amber-50 hover:bg-amber-100 border border-amber-300 transition-colors"
+                                title="Buka halaman latihan di file terpisah (latihan.html)"
+                              >
+                                <span>📝 Ujian Mandiri (latihan.html) →</span>
+                              </a>
+                            </div>
+                          )}
                         </div>
 
                         <div className="pt-2 border-t border-slate-200 flex items-center gap-2">
                           <button
                             type="button"
-                            onClick={() => {
-                              window.location.href = `./materi.html?program=${encodeURIComponent(enrolledProgram.id)}&pekan=${idx * 3 + 1}`;
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (!isUnlocked) {
+                                showToast(`Materi untuk ${mod.weekRange} (${enrolledSchedule.batchCode}) saat ini masih dikunci oleh Asatidz.`);
+                                return;
+                              }
+                              window.location.href = `./materi.html?program=${encodeURIComponent(enrolledProgram.id)}&pekan=${pekanNum}&schedule=${encodeURIComponent(enrolledSchedule.id)}`;
                             }}
-                            className="flex-1 inline-flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-lg bg-emerald-900 text-white hover:bg-emerald-800 transition-colors shadow-xs"
+                            className={`flex-1 inline-flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-lg transition-colors shadow-xs ${
+                              !isUnlocked
+                                ? 'bg-slate-100 text-slate-500 hover:bg-slate-200 border border-slate-300 cursor-not-allowed'
+                                : 'bg-emerald-900 text-white hover:bg-emerald-800 cursor-pointer'
+                            }`}
+                            title={!isUnlocked ? `Materi Pekan ${pekanNum} masih dikunci oleh Asatidz` : `Buka Materi Pekan ${pekanNum}`}
                           >
-                            <BookOpen className="w-3.5 h-3.5" />
-                            <span>
-                              {idx === 0
-                                ? 'Buka Materi Muqaddimah (Pekan 1) →'
-                                : `Buka Materi Pekan ${idx * 3 + 1} →`}
-                            </span>
+                            {!isUnlocked ? (
+                              <>
+                                <Lock className="w-3.5 h-3.5 text-amber-700" />
+                                <span>Materi Pekan {pekanNum} (Terkunci)</span>
+                              </>
+                            ) : (
+                              <>
+                                <BookOpen className="w-3.5 h-3.5" />
+                                <span>
+                                  {pekanNum === 1
+                                    ? 'Buka Materi Muqaddimah (Pekan 1) →'
+                                    : `Buka Materi Pekan ${pekanNum} →`}
+                                </span>
+                              </>
+                            )}
                           </button>
                           <button
                             type="button"
@@ -1204,10 +3886,9 @@ export default function StudentPortalApp() {
                 {openedModuleIndex !== null && (() => {
                   const mod = enrolledProgram.modules[openedModuleIndex];
                   if (!mod) return null;
+                  const openedPekanNum = getModulePekanNumber(mod.weekRange, openedModuleIndex);
                   const details = getModuleStudyContent(enrolledProgram.id, openedModuleIndex);
-                  const isDone = studentAccount.completedModuleKeys.includes(
-                    `${enrolledProgram.id}-${openedModuleIndex}`
-                  );
+                  const isDone = isModuleDoneForCurrentRegistration(openedModuleIndex, openedPekanNum);
 
                   return (
                     <div
@@ -1245,6 +3926,14 @@ export default function StudentPortalApp() {
 
                         {/* Modal Body */}
                         <div className="p-6 sm:p-8 space-y-6 text-slate-800 text-xs sm:text-sm leading-relaxed flex-1">
+                          {!isPekanUnlocked(enrolledProgram.id, openedPekanNum, enrolledSchedule?.id) && (
+                            <div className="p-3.5 bg-amber-50 border border-amber-300 rounded-xl text-amber-950 text-xs flex items-center gap-2.5">
+                              <Lock className="w-4 h-4 shrink-0 text-amber-800" />
+                              <span>
+                                <strong>Pemberitahuan Asatidz:</strong> Materi untuk modul {mod.weekRange} ini saat ini berstatus <strong>TERKUNCI</strong> untuk kelas {enrolledSchedule.batchCode}. Asatidz akan membuka akses materi sesuai jadwal perkuliahan berjalan.
+                              </span>
+                            </div>
+                          )}
                           {/* Target Box */}
                           <div className="p-4 rounded-xl bg-[#FBF9F5] border border-slate-200 space-y-1.5">
                             <div className="flex items-center gap-2 font-mono text-xs font-bold text-emerald-900 uppercase">
@@ -1258,6 +3947,27 @@ export default function StudentPortalApp() {
                               {details.intro}
                             </p>
                           </div>
+
+                          {/* Audio Pelajaran Mendengar untuk Pekan Ini */}
+                          {(() => {
+                            if (!isPekanUnlocked(enrolledProgram.id, openedPekanNum, enrolledSchedule?.id)) return null;
+                            const pekanAudioContent = getWeeklyPekanContent(enrolledProgram.id, openedPekanNum, enrolledSchedule?.id);
+                            const openedAudioItems = getNormalizedPekanAudioItems(pekanAudioContent);
+                            if (openedAudioItems.length === 0) return null;
+                            return (
+                              <div className="space-y-2.5">
+                                <h3 className="text-sm font-bold text-slate-900 uppercase font-mono tracking-wider text-emerald-900 border-b border-slate-200 pb-2 flex items-center gap-2">
+                                  <Headphones className="w-4 h-4 text-emerald-800" />
+                                  <span>Pelajaran Mendengar (Istima&apos; — Google Drive)</span>
+                                </h3>
+                                <GoogleDriveAudioPlayer
+                                  items={openedAudioItems}
+                                  pekanNumber={openedPekanNum}
+                                  compact
+                                />
+                              </div>
+                            );
+                          })()}
 
                           {/* Pekanan Syllabus Breakdown */}
                           <div className="space-y-3">
@@ -1402,13 +4112,37 @@ export default function StudentPortalApp() {
                   </div>
                 )}
 
+                {upgradeErrorBanner && (
+                  <div className="p-4 rounded-lg bg-rose-50 border border-rose-200 text-rose-950 text-xs font-medium flex items-center gap-2">
+                    <AlertCircle className="w-4 h-4 text-rose-700 shrink-0" />
+                    <span>{upgradeErrorBanner}</span>
+                  </div>
+                )}
+
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                   {programs.map((prog) => {
                     const isCurrent = prog.id === activeEnrolledProgramId;
-                    const existingReg = enrolledRegistrations.find(
+                    const progRegs = enrolledRegistrations.filter(
                       (r) => r.selectedProgramId === prog.id
                     );
+                    const existingReg = progRegs[0];
                     const isAlreadyEnrolled = Boolean(existingReg);
+                    const otherRegs = progRegs.filter(
+                      (r) => r.registrationNumber !== currentRegistration.registrationNumber
+                    );
+                    const preferredSchedule = getPreferredScheduleForProgram(prog, schedules);
+                    const nextAvailableSchedule = getNextAvailableOpenScheduleForProgram(
+                      prog,
+                      schedules,
+                      progRegs,
+                      programs
+                    );
+                    const hasAnyOpenSchedule = isProgramHasAnyOpenSchedule(prog, schedules);
+                    const displayBatchLabel =
+                      nextAvailableSchedule?.angkatan?.trim() ||
+                      preferredSchedule?.angkatan?.trim() ||
+                      prog.angkatan ||
+                      'Angkatan 1';
 
                     return (
                       <div
@@ -1435,8 +4169,11 @@ export default function StudentPortalApp() {
                           <h4 className="text-xs font-bold text-slate-900 leading-snug">
                             {prog.title}
                           </h4>
+                          <p className="text-[11px] font-semibold text-emerald-800">
+                            {displayBatchLabel}
+                          </p>
                           <p className="text-[11px] font-mono text-slate-600">
-                            {prog.scheduleDays} · {prog.scheduleTime}
+                            {(nextAvailableSchedule || preferredSchedule)?.days || prog.scheduleDays} · {(nextAvailableSchedule || preferredSchedule)?.timeWIB || prog.scheduleTime}
                           </p>
                           <p className="text-xs font-mono font-bold text-emerald-900">
                             {formatIDR(prog.tuitionIDR)} / Level
@@ -1447,43 +4184,463 @@ export default function StudentPortalApp() {
                         </div>
 
                         {isCurrent ? (
-                          <button
-                            type="button"
-                            disabled
-                            className="w-full px-3 py-2 text-xs font-semibold rounded-lg bg-emerald-900 text-white cursor-default"
-                          >
-                            Sedang Dibuka
-                          </button>
+                          <div className="space-y-1.5 w-full">
+                            <button
+                              type="button"
+                              disabled
+                              className="w-full px-3 py-2 text-xs font-semibold rounded-lg bg-emerald-900 text-white cursor-default"
+                            >
+                              Sedang Dibuka
+                            </button>
+                            {otherRegs.map((oReg) => {
+                              const oBatch = oReg.selectedProgramName?.match(/(Angkatan\s*\d+)/i)?.[1] || oReg.registrationNumber;
+                              return (
+                                <button
+                                  key={oReg.registrationNumber}
+                                  type="button"
+                                  onClick={() => handleSelectRegistration(oReg)}
+                                  className="w-full px-3 py-1.5 text-[11px] font-semibold rounded-lg bg-emerald-100/70 text-emerald-900 hover:bg-emerald-200 transition-colors border border-emerald-300 flex items-center justify-center gap-1 cursor-pointer"
+                                  title={`Buka ${oBatch} (${oReg.registrationNumber})`}
+                                >
+                                  <span>Buka {oBatch} ({oReg.registrationNumber}) →</span>
+                                </button>
+                              );
+                            })}
+                            {nextAvailableSchedule ? (
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  handleRequestAdditionalEnrollConfirm(prog, true, nextAvailableSchedule)
+                                }
+                                className="w-full px-3 py-1.5 text-[11px] font-semibold rounded-lg text-emerald-950 bg-white hover:bg-emerald-50 border border-emerald-300 transition-colors flex items-center justify-center gap-1.5 cursor-pointer shadow-2xs"
+                                title="Daftar ulang untuk mengikuti kelas Live Zoom di angkatan baru tanpa menghapus data sebelumnya"
+                              >
+                                <RotateCcw className="w-3 h-3 text-emerald-700" />
+                                <span>Daftar Ulang ({nextAvailableSchedule.angkatan?.trim() || prog.angkatan || 'Angkatan Baru'})</span>
+                              </button>
+                            ) : (
+                              <div className="w-full px-3 py-1.5 text-[11px] font-medium rounded-lg text-emerald-900 bg-emerald-50 border border-emerald-200 text-center">
+                                {hasAnyOpenSchedule
+                                  ? `✓ Sudah Terdaftar (${displayBatchLabel})`
+                                  : 'Pendaftaran Angkatan Baru Ditutup (OFF)'}
+                              </div>
+                            )}
+                          </div>
                         ) : isAlreadyEnrolled && existingReg ? (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setActiveEnrolledProgramId(prog.id);
-                              setStudentRegistration(existingReg);
-                            }}
-                            className="w-full px-3 py-2 text-xs font-semibold rounded-lg bg-emerald-100 text-emerald-900 hover:bg-emerald-200 transition-colors border border-emerald-300"
-                          >
-                            Buka Kelas Ini →
-                          </button>
+                          <div className="space-y-1.5 w-full">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                handleSelectRegistration(existingReg);
+                              }}
+                              className="w-full px-3 py-2 text-xs font-semibold rounded-lg bg-emerald-100 text-emerald-900 hover:bg-emerald-200 transition-colors border border-emerald-300"
+                            >
+                              Buka Kelas Ini →
+                            </button>
+                            {nextAvailableSchedule ? (
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  handleRequestAdditionalEnrollConfirm(prog, true, nextAvailableSchedule)
+                                }
+                                className="w-full px-3 py-1.5 text-[11px] font-semibold rounded-lg text-emerald-950 bg-white hover:bg-emerald-50 border border-emerald-300 transition-colors flex items-center justify-center gap-1.5 cursor-pointer shadow-2xs"
+                                title="Daftar ulang untuk mengikuti kelas Live Zoom di angkatan baru tanpa menghapus data sebelumnya"
+                              >
+                                <RotateCcw className="w-3 h-3 text-emerald-700" />
+                                <span>Daftar Ulang ({nextAvailableSchedule.angkatan?.trim() || prog.angkatan || 'Angkatan Baru'})</span>
+                              </button>
+                            ) : (
+                              <div className="w-full px-3 py-1.5 text-[11px] font-medium rounded-lg text-emerald-900 bg-emerald-50 border border-emerald-200 text-center">
+                                {hasAnyOpenSchedule
+                                  ? `✓ Sudah Terdaftar (${displayBatchLabel})`
+                                  : 'Pendaftaran Angkatan Baru Ditutup (OFF)'}
+                              </div>
+                            )}
+                          </div>
                         ) : (
                           <button
                             type="button"
-                            disabled={prog.registrationOpen === false}
-                            onClick={() => handleEnrollAdditionalProgram(prog)}
+                            disabled={!hasAnyOpenSchedule}
+                            onClick={() =>
+                              handleRequestAdditionalEnrollConfirm(prog, false, preferredSchedule)
+                            }
                             className={`w-full px-3 py-2 text-xs font-semibold rounded-lg transition-colors ${
-                              prog.registrationOpen === false
+                              !hasAnyOpenSchedule
                                 ? 'bg-rose-100 text-rose-900 border border-rose-300 cursor-not-allowed'
-                                : 'bg-slate-900 text-white hover:bg-emerald-900'
+                                : 'bg-slate-900 text-white hover:bg-emerald-900 cursor-pointer'
                             }`}
                           >
-                            {prog.registrationOpen === false
+                            {!hasAnyOpenSchedule
                               ? 'Pendaftaran Ditutup (OFF)'
-                              : `+ Daftar Level ${prog.levelNumber}`}
+                              : `+ Daftar Level ${prog.levelNumber} (${displayBatchLabel})`}
                           </button>
                         )}
                       </div>
                     );
                   })}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* =====================================================================
+              TAB: BIAYA PENDIDIKAN & SISA CICILAN BELAJAR
+             ===================================================================== */}
+          {activeTab === 'pembayaran' && (
+            <div className="space-y-8">
+              {/* Toast banner */}
+              {toastMsg && (
+                <div className="bg-emerald-900 text-white text-xs px-4 py-2.5 rounded-lg flex items-center justify-between shadow-md">
+                  <div className="flex items-center gap-2">
+                    <Check className="w-4 h-4 text-emerald-300" />
+                    <span>{toastMsg}</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setToastMsg(null)}
+                    className="text-emerald-200 hover:text-white font-bold ml-4"
+                  >
+                    ✕
+                  </button>
+                </div>
+              )}
+
+              {/* Header Box */}
+              <div className="bg-gradient-to-r from-slate-900 via-emerald-950 to-slate-900 text-white rounded-2xl p-6 sm:p-8 shadow-sm">
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                  <div>
+                    <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-mono font-medium bg-white/10 text-emerald-200 border border-white/15 mb-3">
+                      <CreditCard className="w-3.5 h-3.5" />
+                      <span>Sistem Keuangan & Biaya Santri</span>
+                    </div>
+                    <h2 className="text-xl sm:text-2xl font-serif font-bold tracking-tight">
+                      Informasi Biaya Pendidikan & Sisa Cicilan
+                    </h2>
+                    <p className="text-xs sm:text-sm text-slate-300 mt-1">
+                      Program: <span className="text-emerald-300 font-semibold">{enrolledProgram.title}</span> · Santri: <span className="text-white font-medium">{currentRegistration.fullName}</span> ({currentRegistration.registrationNumber})
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-3">
+                    <a
+                      href={getConfirmationWaUrl(remainingTuition > 0 ? monthlyInstallment : totalTuition)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-2 px-4 py-2.5 text-xs font-semibold rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white transition-colors shadow"
+                    >
+                      <MessageCircle className="w-4 h-4" />
+                      <span>Konfirmasi Pembayaran via WA</span>
+                    </a>
+                  </div>
+                </div>
+
+                {/* 3 Metric Cards */}
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mt-6 pt-6 border-t border-white/15">
+                  <div className="bg-white/5 border border-white/10 rounded-xl p-4">
+                    <div className="flex items-center justify-between text-xs text-slate-300 mb-1">
+                      <span>Total Biaya Level Ini</span>
+                      <Receipt className="w-4 h-4 text-slate-400" />
+                    </div>
+                    <div className="text-xl font-bold font-mono text-white">
+                      {formatIDR(totalTuition)}
+                    </div>
+                    <div className="text-[11px] text-slate-400 mt-1">
+                      Skema 6 Bulan (@ {formatIDR(monthlyInstallment)}/bln)
+                    </div>
+                  </div>
+
+                  <div className="bg-white/5 border border-white/10 rounded-xl p-4">
+                    <div className="flex items-center justify-between text-xs text-emerald-300 mb-1">
+                      <span>Sudah Dibayarkan</span>
+                      <Wallet className="w-4 h-4 text-emerald-400" />
+                    </div>
+                    <div className="text-xl font-bold font-mono text-emerald-300">
+                      {formatIDR(paidTuition)}
+                    </div>
+                    <div className="text-[11px] text-emerald-200/80 mt-1 flex items-center gap-1">
+                      <Check className="w-3 h-3 text-emerald-400" />
+                      <span>{paidInstallmentsCount} dari {totalInstallmentMonths} cicilan lunas</span>
+                    </div>
+                  </div>
+
+                  <div className={`border rounded-xl p-4 ${
+                    isTuitionFullyPaid
+                      ? 'bg-emerald-950/40 border-emerald-500/30'
+                      : 'bg-amber-950/30 border-amber-500/30'
+                  }`}>
+                    <div className="flex items-center justify-between text-xs text-slate-300 mb-1">
+                      <span>Sisa Tagihan Belajar</span>
+                      <AlertCircle className={`w-4 h-4 ${isTuitionFullyPaid ? 'text-emerald-400' : 'text-amber-400'}`} />
+                    </div>
+                    <div className={`text-xl font-bold font-mono ${isTuitionFullyPaid ? 'text-emerald-300' : 'text-amber-300'}`}>
+                      {formatIDR(remainingTuition)}
+                    </div>
+                    <div className="text-[11px] mt-1 font-medium">
+                      {isTuitionFullyPaid ? (
+                        <span className="text-emerald-300">Lunas Sepenuhnya (Alhamdulillah)</span>
+                      ) : (
+                        <span className="text-amber-300">Sisa {remainingInstallmentsCount}x Cicilan (@ {formatIDR(monthlyInstallment)})</span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Progress Bar */}
+                <div className="mt-6 pt-5 border-t border-white/10">
+                  <div className="flex items-center justify-between text-xs text-slate-300 mb-2">
+                    <span className="font-medium">Kemajuan Pelunasan Biaya ({paymentProgressPercent}%)</span>
+                    <span className="font-mono text-emerald-300">{formatIDR(paidTuition)} / {formatIDR(totalTuition)}</span>
+                  </div>
+                  <div className="w-full bg-slate-800 rounded-full h-3 overflow-hidden border border-white/10">
+                    <div
+                      className={`h-full transition-all duration-500 ${
+                        isTuitionFullyPaid
+                          ? 'bg-gradient-to-r from-emerald-500 to-teal-400'
+                          : 'bg-gradient-to-r from-amber-500 to-emerald-500'
+                      }`}
+                      style={{ width: `${paymentProgressPercent}%` }}
+                    />
+                  </div>
+                  <p className="text-[11px] text-slate-400 mt-2">
+                    {isTuitionFullyPaid
+                      ? 'Barakallahu fiikum! Seluruh kewajiban biaya pendidikan Anda untuk tingkatan ini telah berstatus Lunas.'
+                      : `Biaya pendidikan di Ma'had Al-Bayan dapat dicicil per bulan santai tanpa bunga dan denda. Sisa cicilan Anda: ${remainingInstallmentsCount} bulan lagi.`
+                    }
+                  </p>
+                </div>
+              </div>
+
+              {/* Grid 2 Kolom: Jadwal Cicilan (Kiri) & Info Transfer Bank + Panduan (Kanan) */}
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+                {/* Kolom Kiri: Rincian Jadwal 6 Bulan Cicilan */}
+                <div className="lg:col-span-7 bg-white border border-slate-200 rounded-xl p-6 space-y-5">
+                  <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+                    <div>
+                      <h3 className="text-sm font-bold text-slate-900">
+                        Jadwal & Riwayat Cicilan 6 Bulan
+                      </h3>
+                      <p className="text-xs text-slate-500 mt-0.5">
+                        Rincian jatuh tempo dan status pelunasan per bulan belajar
+                      </p>
+                    </div>
+                    <span className="px-2.5 py-1 text-[11px] font-mono font-semibold rounded-md bg-slate-100 text-slate-700">
+                      Total 6 Bulan / Periode
+                    </span>
+                  </div>
+
+                  <div className="space-y-3">
+                    {installmentMonthsList.map((item) => {
+                      const isPaid = item.monthIndex <= paidInstallmentsCount;
+                      const isNextDue = item.monthIndex === paidInstallmentsCount + 1 && !isTuitionFullyPaid;
+
+                      return (
+                        <div
+                          key={item.monthIndex}
+                          className={`p-4 rounded-xl border transition-all ${
+                            isPaid
+                              ? 'bg-emerald-50/50 border-emerald-200'
+                              : isNextDue
+                              ? 'bg-amber-50/70 border-amber-300 ring-1 ring-amber-200'
+                              : 'bg-slate-50/50 border-slate-200 opacity-80'
+                          }`}
+                        >
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                            <div className="flex items-start gap-3">
+                              <div
+                                className={`w-8 h-8 rounded-full flex items-center justify-center font-mono font-bold text-xs shrink-0 mt-0.5 ${
+                                  isPaid
+                                    ? 'bg-emerald-800 text-white'
+                                    : isNextDue
+                                    ? 'bg-amber-700 text-white ring-2 ring-amber-200'
+                                    : 'bg-slate-200 text-slate-700'
+                                }`}
+                              >
+                                {isPaid ? '✓' : item.monthIndex}
+                              </div>
+                              <div>
+                                <div className="flex items-center gap-2">
+                                  <span className="text-xs font-bold text-slate-900">
+                                    {item.monthLabel}
+                                  </span>
+                                  {isPaid ? (
+                                    <span className="px-2 py-0.5 text-[10px] font-semibold rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300">
+                                      Lunas
+                                    </span>
+                                  ) : isNextDue ? (
+                                    <span className="px-2 py-0.5 text-[10px] font-semibold rounded-full bg-amber-100 text-amber-900 border border-amber-300 animate-pulse">
+                                      Jatuh Tempo Berikutnya
+                                    </span>
+                                  ) : (
+                                    <span className="px-2 py-0.5 text-[10px] font-semibold rounded-full bg-slate-200 text-slate-700">
+                                      Belum Jatuh Tempo
+                                    </span>
+                                  )}
+                                </div>
+                                <p className="text-[11px] text-slate-500 mt-0.5">
+                                  {item.note} · <span className="font-medium text-slate-600">Estimasi: {item.dueDate}</span>
+                                </p>
+                              </div>
+                            </div>
+
+                            <div className="flex sm:flex-col items-center sm:items-end justify-between sm:justify-center gap-2 pt-2 sm:pt-0 border-t sm:border-t-0 border-slate-200">
+                              <div className="text-right">
+                                <span className="text-xs font-mono font-bold text-slate-900">
+                                  {formatIDR(monthlyInstallment)}
+                                </span>
+                              </div>
+                              {isPaid ? (
+                                <span className="text-[11px] text-emerald-700 font-medium flex items-center gap-1">
+                                  <Check className="w-3 h-3" />
+                                  <span>Terverifikasi</span>
+                                </span>
+                              ) : (
+                                <a
+                                  href={getConfirmationWaUrl(monthlyInstallment, item.monthIndex)}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-semibold rounded-md bg-emerald-800 hover:bg-emerald-900 text-white transition-colors"
+                                >
+                                  <span>Bayar / Konfirmasi</span>
+                                  <ExternalLink className="w-3 h-3" />
+                                </a>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {/* Catatan Muamalah */}
+                  <div className="p-3.5 bg-slate-50 rounded-lg border border-slate-200 text-xs text-slate-600 space-y-1">
+                    <div className="font-semibold text-slate-800 flex items-center gap-1.5">
+                      <AlertCircle className="w-3.5 h-3.5 text-emerald-800" />
+                      <span>Akad & Kebijakan Cicilan Syar'i:</span>
+                    </div>
+                    <p className="text-[11px] text-slate-600">
+                      1. Ma'had tidak mengenakan denda atau bunga atas keterlambatan cicilan demi menjaga kesucian muamalah.
+                    </p>
+                    <p className="text-[11px] text-slate-600">
+                      2. Santri diperbolehkan melunasi sisa seluruh cicilan sekaligus kapan saja selama masa pembelajaran aktif.
+                    </p>
+                  </div>
+                </div>
+
+                {/* Kolom Kanan: Rekening Resmi Pembayaran & Tata Cara */}
+                <div className="lg:col-span-5 space-y-6">
+                  {/* Rekening Pembayaran Card */}
+                  <div className="bg-white border border-slate-200 rounded-xl p-6 space-y-4 shadow-sm">
+                    <div className="pb-3 border-b border-slate-100">
+                      <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+                        <Wallet className="w-4 h-4 text-emerald-800" />
+                        <span>Rekening Resmi Ma'had</span>
+                      </h3>
+                      <p className="text-xs text-slate-500 mt-0.5">
+                        Transfer pembayaran cicilan hanya ditujukan ke rekening resmi berikut:
+                      </p>
+                    </div>
+
+                    {/* Bank 1: BSI */}
+                    <div className="p-4 bg-emerald-50/70 border border-emerald-200 rounded-xl space-y-2">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <span className="font-bold text-xs text-emerald-950 px-2 py-0.5 rounded bg-emerald-200/80">
+                            BSI
+                          </span>
+                          <span className="text-xs font-semibold text-slate-800">
+                            Bank Syariah Indonesia
+                          </span>
+                        </div>
+                        <span className="text-[10px] font-mono text-slate-500">Kode: 451</span>
+                      </div>
+                      <div className="flex items-center justify-between bg-white px-3 py-2 rounded-lg border border-emerald-200">
+                        <div>
+                          <p className="text-[10px] text-slate-400 font-medium">Nomor Rekening</p>
+                          <p className="text-sm font-mono font-bold text-slate-900 tracking-wider">
+                            7198234551
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => handleCopyText('7198234551', 'No. Rekening BSI')}
+                          className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold rounded bg-emerald-800 text-white hover:bg-emerald-900 transition-colors"
+                        >
+                          <Copy className="w-3 h-3" />
+                          <span>Salin</span>
+                        </button>
+                      </div>
+                      <p className="text-[11px] text-slate-600">
+                        Atas Nama: <strong className="text-slate-900">Ma'had Tadribul Lughah Al-Bayan</strong>
+                      </p>
+                    </div>
+
+                    {/* Bank 2: BCA */}
+                    <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-2">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <span className="font-bold text-xs text-blue-900 px-2 py-0.5 rounded bg-blue-100">
+                            BCA
+                          </span>
+                          <span className="text-xs font-semibold text-slate-800">
+                            Bank Central Asia
+                          </span>
+                        </div>
+                        <span className="text-[10px] font-mono text-slate-500">Kode: 014</span>
+                      </div>
+                      <div className="flex items-center justify-between bg-white px-3 py-2 rounded-lg border border-slate-200">
+                        <div>
+                          <p className="text-[10px] text-slate-400 font-medium">Nomor Rekening</p>
+                          <p className="text-sm font-mono font-bold text-slate-900 tracking-wider">
+                            8410294821
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => handleCopyText('8410294821', 'No. Rekening BCA')}
+                          className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold rounded bg-slate-800 text-white hover:bg-slate-900 transition-colors"
+                        >
+                          <Copy className="w-3 h-3" />
+                          <span>Salin</span>
+                        </button>
+                      </div>
+                      <p className="text-[11px] text-slate-600">
+                        Atas Nama: <strong className="text-slate-900">Tadribul Lughah Al-Bayan</strong>
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Panduan Konfirmasi */}
+                  <div className="bg-white border border-slate-200 rounded-xl p-6 space-y-4">
+                    <h3 className="text-sm font-bold text-slate-900">
+                      Cara Konfirmasi Setelah Transfer:
+                    </h3>
+                    <ol className="text-xs text-slate-600 space-y-2.5 list-decimal pl-4">
+                      <li>
+                        Transfer nominal cicilan (sebesar <strong className="text-slate-900">{formatIDR(monthlyInstallment)}</strong>) ke rekening BSI atau BCA di atas.
+                      </li>
+                      <li>
+                        Simpan bukti transfer (struk ATM, screenshot m-banking, atau mutasi).
+                      </li>
+                      <li>
+                        Klik tombol hijau <strong>"Konfirmasi via WhatsApp"</strong> di bawah ini atau kirim manual ke nomor resmi <strong className="text-slate-900">+62 812-8841-9023</strong>.
+                      </li>
+                      <li>
+                        Sertakan foto bukti transfer dan nomor registrasi Anda: <strong className="font-mono text-emerald-800">{currentRegistration.registrationNumber}</strong>.
+                      </li>
+                      <li>
+                        Bagian keuangan Ma'had akan memperbarui data cicilan Anda di portal ini dalam waktu maksimal 1x24 jam kerja.
+                      </li>
+                    </ol>
+
+                    <a
+                      href={getConfirmationWaUrl(remainingTuition > 0 ? monthlyInstallment : totalTuition)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="w-full flex items-center justify-center gap-2 px-4 py-2.5 text-xs font-semibold text-white bg-emerald-800 hover:bg-emerald-900 rounded-lg transition-colors shadow-sm"
+                    >
+                      <MessageCircle className="w-4 h-4" />
+                      <span>Kirim Bukti Pembayaran ke WhatsApp Admin</span>
+                    </a>
+                  </div>
                 </div>
               </div>
             </div>
@@ -1518,7 +4675,7 @@ export default function StudentPortalApp() {
                         {studentRegistration.fullName}
                       </h3>
                       <p className="text-xs font-mono text-slate-300 mt-0.5">
-                        {studentAccount.email} · {studentAccount.whatsapp}
+                        {studentAccount.email} · {formatWhatsAppNumber(studentAccount.whatsapp) || studentAccount.whatsapp}
                       </p>
                     </div>
                     <span className="px-3 py-1 rounded-md bg-emerald-900 text-emerald-200 font-mono text-xs font-semibold shrink-0">
@@ -1546,9 +4703,13 @@ export default function StudentPortalApp() {
                       </p>
                     </div>
                     <div>
-                      <p className="text-slate-400">Status Verifikasi</p>
+                      <p className="text-slate-400">Status Pembayaran</p>
                       <p className="text-emerald-300 font-semibold mt-0.5">
-                        {studentRegistration.status}
+                        {isTuitionFullyPaid
+                          ? '✓ Lunas Penuh (6/6)'
+                          : paidInstallmentsCount > 0
+                            ? `Cicilan ${paidInstallmentsCount}/6 Lunas`
+                            : 'Belum Lunas (Bulan 1)'}
                       </p>
                     </div>
                   </div>
@@ -1659,12 +4820,13 @@ export default function StudentPortalApp() {
               </div>
             </div>
           )}
-        </div>
-      </main>
+          </div>
+        </main>
+      </div>
 
       {/* Institutional Footer */}
       <footer className="bg-slate-950 text-slate-400 py-8 border-t border-slate-800 text-xs">
-        <div className="max-w-[1200px] mx-auto px-6 flex flex-col sm:flex-row items-center justify-between gap-4">
+        <div className="max-w-[1380px] mx-auto px-4 sm:px-6 flex flex-col sm:flex-row items-center justify-between gap-4">
           <p>
             File Terpisah Portal Pelajar (<span className="font-mono text-slate-200">pelajar.html</span>) — Khusus Pelajar Terdaftar Tadribul Lughah
           </p>
@@ -1685,6 +4847,16 @@ export default function StudentPortalApp() {
           </div>
         </div>
       </footer>
+
+      <EnrollmentConfirmModal
+        pending={pendingEnrollVerify}
+        studentName={studentAccount.fullName}
+        studentEmail={studentAccount.email}
+        studentWhatsapp={studentAccount.whatsapp}
+        isSubmitting={isConfirmingEnrollModal}
+        onCancel={() => setPendingEnrollVerify(null)}
+        onConfirm={handleExecuteVerifiedEnrollment}
+      />
     </div>
   );
 }

@@ -25,7 +25,8 @@ import {
   TURATS_IMAGE_PATH,
   HIWAR_IMAGE_PATH,
   getStoredRegistrationOpenMap,
-  getStoredAngkatanMap
+  getStoredAngkatanMap,
+  getStoredStartDateMap
 } from './data/arabicAcademyData';
 
 // Initialize Firebase SDK
@@ -153,20 +154,24 @@ export function programToFirestoreDoc(program: ProgramTrack) {
     featured: Boolean(program.featuredSpan),
     registrationOpen: program.registrationOpen !== false,
     angkatan: (program.angkatan?.trim() || 'Angkatan 1').slice(0, 100),
+    startDate: (program.startDate?.trim() || '19 November 2026').slice(0, 100),
+    modeLabel: (program.modeLabel?.trim() || 'Online Live Interaktif (Zoom)').slice(0, 120),
     order: Math.max(1, Math.min(100, Math.round(program.levelNumber))),
     updatedAt: new Date().toISOString()
   };
 }
 
 export function firestoreDocToProgram(
-  data: Record<string, unknown>
+  data: Record<string, unknown>,
+  docId?: string
 ): ProgramTrack {
-  const id = String(data.id || '');
-  const order = Number(data.order) || 1;
+  const rawId = String(data.id || docId || '');
+  const order = Number(data.order) || (rawId.includes('4') ? 4 : rawId.includes('3') ? 3 : rawId.includes('2') ? 2 : 1);
   const fallback =
-    PROGRAM_TRACKS.find((p) => p.id === id) ||
+    PROGRAM_TRACKS.find((p) => p.id === rawId) ||
     PROGRAM_TRACKS.find((p) => p.levelNumber === order) ||
     PROGRAM_TRACKS[0];
+  const id = fallback?.id || (rawId.startsWith('tl-level-') ? rawId : `tl-level-${order}`);
 
   const categoryStr = String(data.category || '');
   const isShorof = categoryStr === 'Ilmu Shorof' || order === 4;
@@ -218,6 +223,17 @@ export function firestoreDocToProgram(
         : typeof data.angkatan === 'string' && data.angkatan.trim()
           ? data.angkatan.trim()
           : fallback.angkatan || 'Angkatan 1',
+    startDate:
+      typeof getStoredStartDateMap()[id] === 'string' &&
+      getStoredStartDateMap()[id].trim()
+        ? getStoredStartDateMap()[id]
+        : typeof data.startDate === 'string' && data.startDate.trim()
+          ? data.startDate.trim()
+          : fallback.startDate || '19 November 2026',
+    modeLabel:
+      typeof data.modeLabel === 'string' && data.modeLabel.trim()
+        ? data.modeLabel.trim()
+        : fallback.modeLabel || 'Online Live Interaktif (Zoom)',
     modules: fallback.modules
   };
 }
@@ -243,6 +259,11 @@ export function scheduleToFirestoreDoc(schedule: ClassSchedule) {
     ),
     feeIDR: Math.max(0, Math.min(100000000, Math.round(schedule.feeIDR))),
     order: Math.max(1, Math.min(200, Math.round(schedule.levelNumber || 1))),
+    meetingLink: (schedule.meetingLink || '').slice(0, 500),
+    meetingPlatform: (schedule.meetingPlatform || 'Google Meet').slice(0, 100),
+    meetingNotes: (schedule.meetingNotes || '').slice(0, 500),
+    angkatan: (schedule.angkatan || 'Angkatan 1').slice(0, 60),
+    registrationOpen: schedule.registrationOpen !== false,
     updatedAt: new Date().toISOString()
   };
 }
@@ -271,7 +292,12 @@ export function firestoreDocToSchedule(
     feeIDR:
       typeof data.feeIDR === 'number' && data.feeIDR !== 85000
         ? data.feeIDR
-        : 510000
+        : 510000,
+    meetingLink: typeof data.meetingLink === 'string' ? data.meetingLink : '',
+    meetingPlatform: typeof data.meetingPlatform === 'string' ? data.meetingPlatform : 'Google Meet',
+    meetingNotes: typeof data.meetingNotes === 'string' ? data.meetingNotes : '',
+    angkatan: typeof data.angkatan === 'string' && data.angkatan.trim() ? data.angkatan : undefined,
+    registrationOpen: typeof data.registrationOpen === 'boolean' ? data.registrationOpen : true
   };
 }
 
@@ -295,8 +321,12 @@ export function registrationToPrivateFirestoreDoc(rec: RegistrationRecord) {
       0,
       Math.min(100000000, Math.round(rec.totalTuitionIDR))
     ),
+    paidTuitionIDR: typeof rec.paidTuitionIDR === 'number' ? Math.max(0, rec.paidTuitionIDR) : undefined,
+    installmentPaidCount: typeof rec.installmentPaidCount === 'number' ? Math.max(0, rec.installmentPaidCount) : undefined,
+    paymentPlan: rec.paymentPlan || 'cicilan',
+    lastPaymentDate: rec.lastPaymentDate ? rec.lastPaymentDate.slice(0, 80) : undefined,
     registeredAt: rec.registeredAt.slice(0, 80),
-    status: rec.status.slice(0, 120),
+    status: (rec.status || 'Terdaftar').slice(0, 120),
     updatedAt: new Date().toISOString()
   };
 }
@@ -317,7 +347,7 @@ export function registrationToPublicStatusDoc(rec: RegistrationRecord) {
       Math.min(100000000, Math.round(rec.totalTuitionIDR))
     ),
     registeredAt: rec.registeredAt.slice(0, 80),
-    status: rec.status.slice(0, 120),
+    status: (rec.status || 'Terdaftar').slice(0, 120),
     updatedAt: new Date().toISOString()
   };
 }
@@ -326,7 +356,7 @@ export function firestoreDocToRegistration(
   data: Record<string, unknown>
 ): RegistrationRecord {
   const rawStatus = String(
-    data.status || 'Terverifikasi — Menunggu Orientasi'
+    data.status || 'Terdaftar'
   );
   return {
     registrationNumber: String(data.registrationNumber || ''),
@@ -355,11 +385,12 @@ export function firestoreDocToRegistration(
       typeof data.totalTuitionIDR === 'number' && data.totalTuitionIDR !== 85000
         ? data.totalTuitionIDR
         : 510000,
+    paidTuitionIDR: typeof data.paidTuitionIDR === 'number' ? data.paidTuitionIDR : undefined,
+    installmentPaidCount: typeof data.installmentPaidCount === 'number' ? data.installmentPaidCount : undefined,
+    paymentPlan: (data.paymentPlan as 'lunas' | 'cicilan') || 'cicilan',
+    lastPaymentDate: typeof data.lastPaymentDate === 'string' ? data.lastPaymentDate : undefined,
     registeredAt: String(data.registeredAt || '-'),
-    status:
-      rawStatus === 'Menunggu Konfirmasi Pembayaran'
-        ? 'Menunggu Konfirmasi Pembayaran'
-        : 'Terverifikasi — Menunggu Orientasi'
+    status: rawStatus || 'Terdaftar'
   };
 }
 

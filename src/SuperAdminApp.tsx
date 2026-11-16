@@ -7,8 +7,13 @@ import {
   ClassSchedule,
   RegistrationRecord,
   applyRegistrationOpenOverrides,
+  applyScheduleStartDateOverrides,
   saveProgramRegistrationOpenState,
-  saveProgramAngkatanState
+  saveProgramAngkatanState,
+  saveProgramFullState,
+  saveScheduleOverride,
+  deleteScheduleOverride,
+  syncProgramStatesFromServer
 } from './data/arabicAcademyData';
 import { SuperAdminPanel } from './components/SuperAdminPanel';
 import { CpanelDbConfig } from './utils/cpanelSqlGenerator';
@@ -40,15 +45,25 @@ import {
   firestoreDocToRegistration
 } from './firebase';
 import { ExternalLink, ShieldCheck, Lock } from 'lucide-react';
+import {
+  cleanupStudentAccountAfterRegistrationDelete,
+  fetchServerRegistrations
+} from './utils/studentAccountStore';
 
 const STORAGE_KEY = 'tadribul_lughah_registrations_v3';
 const CPANEL_CONFIG_KEY = 'tadribul_lughah_cpanel_sql_config_v1';
 
-export default function SuperAdminApp() {
+export default function SuperAdminApp({
+  pageMode = 'panel'
+}: {
+  pageMode?: 'panel' | 'edit-jadwal';
+}) {
   const [programs, setPrograms] = useState<ProgramTrack[]>(() =>
     applyRegistrationOpenOverrides(PROGRAM_TRACKS)
   );
-  const [schedules, setSchedules] = useState<ClassSchedule[]>(CLASS_SCHEDULES);
+  const [schedules, setSchedules] = useState<ClassSchedule[]>(() =>
+    applyScheduleStartDateOverrides(CLASS_SCHEDULES)
+  );
   const [publicRegistrations, setPublicRegistrations] = useState<
     RegistrationRecord[]
   >(() => {
@@ -133,6 +148,25 @@ export default function SuperAdminApp() {
   const isAuthorizedSuperAdmin = isFirebaseSuperAdmin || hasSessionToken;
 
   useEffect(() => {
+    syncProgramStatesFromServer().catch(() => {});
+    fetchServerRegistrations()
+      .then((serverRegs) => {
+        if (serverRegs.length === 0) return;
+        setPublicRegistrations((prev) => {
+          const map = new Map<string, RegistrationRecord>();
+          for (const item of prev) {
+            if (item?.registrationNumber) {
+              map.set(item.registrationNumber.toUpperCase(), item);
+            }
+          }
+          for (const srv of serverRegs) {
+            const key = srv.registrationNumber.toUpperCase();
+            map.set(key, { ...(map.get(key) || {}), ...srv });
+          }
+          return Array.from(map.values());
+        });
+      })
+      .catch(() => {});
     testFirestoreConnection();
     const unsubAuth = onAuthStateChanged(auth, (user) => {
       setCurrentUser(user);
@@ -154,11 +188,14 @@ export default function SuperAdminApp() {
     if (!authInitialized) return;
     if (!isAuthorizedSuperAdmin) {
       const timer = setTimeout(() => {
-        window.location.replace('./login.html');
+        const currentSearch = typeof window !== 'undefined' ? window.location.search : '';
+        const targetFile = pageMode === 'edit-jadwal' ? `edit-jadwal.html${currentSearch}` : '';
+        const redirectQuery = targetFile ? `?redirect=${encodeURIComponent(targetFile)}` : '';
+        window.location.replace(`./login.html${redirectQuery}`);
       }, 600);
       return () => clearTimeout(timer);
     }
-  }, [authInitialized, isAuthorizedSuperAdmin]);
+  }, [authInitialized, isAuthorizedSuperAdmin, pageMode]);
 
   useEffect(() => {
     if (!isAuthorizedSuperAdmin) return;
@@ -169,10 +206,10 @@ export default function SuperAdminApp() {
         if (!snap.empty) {
           const loaded = snap.docs
             .map((d) =>
-              firestoreDocToProgram(d.data() as Record<string, unknown>)
+              firestoreDocToProgram(d.data() as Record<string, unknown>, d.id)
             )
             .sort((a, b) => a.levelNumber - b.levelNumber);
-          setPrograms(loaded);
+          setPrograms(applyRegistrationOpenOverrides(loaded));
         }
       },
       (error) => {
@@ -189,7 +226,7 @@ export default function SuperAdminApp() {
               firestoreDocToSchedule(d.data() as Record<string, unknown>)
             )
             .sort((a, b) => a.levelNumber - b.levelNumber);
-          setSchedules(loaded);
+          setSchedules(applyScheduleStartDateOverrides(loaded));
         }
       },
       (error) => {
@@ -286,18 +323,39 @@ export default function SuperAdminApp() {
   };
 
   const handleSaveProgram = async (prog: ProgramTrack) => {
-    saveProgramRegistrationOpenState(prog.id, prog.registrationOpen !== false);
-    saveProgramAngkatanState(prog.id, prog.angkatan || 'Angkatan 1');
+    saveProgramFullState(prog.id, {
+      registrationOpen: prog.registrationOpen !== false,
+      angkatan: prog.angkatan || 'Angkatan 1',
+      startDate: prog.startDate || '19 November 2026'
+    });
     setPrograms((prev) =>
       prev
         .map((p) => (p.id === prog.id ? prog : p))
         .sort((a, b) => a.levelNumber - b.levelNumber)
     );
+    setSchedules((prev) =>
+      prev.map((s) =>
+        s.programId === prog.id || s.levelNumber === prog.levelNumber
+          ? { ...s, startDate: prog.startDate || s.startDate }
+          : s
+      )
+    );
     await syncToCpanelMySql('program', prog);
+    const matchingSchedule = schedules.find(
+      (s) => s.programId === prog.id || s.levelNumber === prog.levelNumber
+    );
+    if (matchingSchedule && prog.startDate) {
+      const updatedSch = { ...matchingSchedule, startDate: prog.startDate };
+      await syncToCpanelMySql('schedule', updatedSch);
+    }
     if (isFirebaseSuperAdmin) {
       const path = `programs/${prog.id}`;
       try {
         await setDoc(doc(db, 'programs', prog.id), programToFirestoreDoc(prog));
+        if (matchingSchedule && prog.startDate) {
+          const updatedSch = { ...matchingSchedule, startDate: prog.startDate };
+          await setDoc(doc(db, 'schedules', updatedSch.id), scheduleToFirestoreDoc(updatedSch));
+        }
       } catch (error) {
         handleFirestoreError(error, OperationType.WRITE, path);
       }
@@ -305,12 +363,13 @@ export default function SuperAdminApp() {
   };
 
   const handleSaveSchedule = async (sch: ClassSchedule) => {
+    saveScheduleOverride(sch);
     setSchedules((prev) => {
       const exists = prev.some((s) => s.id === sch.id);
       const updated = exists
         ? prev.map((s) => (s.id === sch.id ? sch : s))
         : [...prev, sch];
-      return updated.sort((a, b) => a.levelNumber - b.levelNumber);
+      return applyScheduleStartDateOverrides(updated);
     });
     await syncToCpanelMySql('schedule', sch);
     if (isFirebaseSuperAdmin) {
@@ -327,6 +386,7 @@ export default function SuperAdminApp() {
   };
 
   const handleDeleteSchedule = async (scheduleId: string) => {
+    deleteScheduleOverride(scheduleId);
     setSchedules((prev) => prev.filter((s) => s.id !== scheduleId));
     if (isFirebaseSuperAdmin) {
       const path = `schedules/${scheduleId}`;
@@ -339,17 +399,41 @@ export default function SuperAdminApp() {
   };
 
   const handleSaveRegistration = async (record: RegistrationRecord) => {
-    setPublicRegistrations((prev) =>
-      prev.map((r) =>
-        r.registrationNumber === record.registrationNumber ? record : r
-      )
-    );
-    setPrivateRegistrations((prev) =>
-      prev.map((r) =>
-        r.registrationNumber === record.registrationNumber ? record : r
-      )
-    );
+    let updatedPublic: RegistrationRecord[] = [];
+    setPublicRegistrations((prev) => {
+      const exists = prev.some((r) => r.registrationNumber === record.registrationNumber);
+      updatedPublic = exists
+        ? prev.map((r) => (r.registrationNumber === record.registrationNumber ? record : r))
+        : [record, ...prev];
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(updatedPublic));
+        window.dispatchEvent(new Event('storage'));
+      } catch {
+        // Ignore storage errors
+      }
+      return updatedPublic;
+    });
+
+    setPrivateRegistrations((prev) => {
+      const exists = prev.some((r) => r.registrationNumber === record.registrationNumber);
+      return exists
+        ? prev.map((r) => (r.registrationNumber === record.registrationNumber ? record : r))
+        : [record, ...prev];
+    });
+
+    // Sync to cPanel Server JSON API & MySQL
+    try {
+      fetch('./api.php?entity=registrations', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(record)
+      }).catch((e) => console.warn('Sync registration notice:', e));
+    } catch {
+      // Ignore
+    }
+
     await syncToCpanelMySql('registration', record);
+
     if (isFirebaseSuperAdmin) {
       const privatePath = `registrations/${record.registrationNumber}`;
       try {
@@ -368,12 +452,43 @@ export default function SuperAdminApp() {
   };
 
   const handleDeleteRegistration = async (registrationNumber: string) => {
-    setPublicRegistrations((prev) =>
-      prev.filter((r) => r.registrationNumber !== registrationNumber)
-    );
+    const deletedRecord =
+      publicRegistrations.find((r) => r.registrationNumber === registrationNumber) ||
+      privateRegistrations.find((r) => r.registrationNumber === registrationNumber);
+    const remainingPublic = publicRegistrations.filter((r) => r.registrationNumber !== registrationNumber);
+    const remainingPrivate = privateRegistrations.filter((r) => r.registrationNumber !== registrationNumber);
+    const remainingAll =
+      isFirebaseSuperAdmin && privateRegistrations.length > 0 ? remainingPrivate : remainingPublic;
+
+    // 1. Update React state & localStorage
+    setPublicRegistrations((prev) => {
+      const updated = prev.filter((r) => r.registrationNumber !== registrationNumber);
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
+        localStorage.setItem('tl_registrations_v1', JSON.stringify(updated));
+        window.dispatchEvent(new Event('storage'));
+      } catch {}
+      return updated;
+    });
     setPrivateRegistrations((prev) =>
       prev.filter((r) => r.registrationNumber !== registrationNumber)
     );
+
+    // 2. Remove registration from student account, or delete account completely if no other registrations left
+    cleanupStudentAccountAfterRegistrationDelete(
+      registrationNumber,
+      deletedRecord?.email,
+      remainingAll
+    );
+
+    // 3. Delete from cPanel registrations.json
+    try {
+      fetch(`./api.php?entity=registrations&action=delete&key=${encodeURIComponent(registrationNumber)}`, {
+        method: 'POST'
+      }).catch(() => {});
+    } catch {}
+
+    // 4. Delete from Firestore
     if (isFirebaseSuperAdmin) {
       const privatePath = `registrations/${registrationNumber}`;
       try {
@@ -428,13 +543,13 @@ export default function SuperAdminApp() {
             <Lock className="w-5 h-5 text-rose-400" />
           </div>
           <p className="text-xs font-mono text-emerald-400">
-            PROTEKSI FILE SUPERADMIN.HTML
+            {pageMode === 'edit-jadwal' ? 'PROTEKSI FILE EDIT-JADWAL.HTML' : 'PROTEKSI FILE SUPERADMIN.HTML'}
           </p>
           <h1 className="text-xl font-semibold text-white">
             Akses Terkunci — Khusus Superadmin
           </h1>
           <p className="text-xs text-slate-300 leading-relaxed">
-            Halaman <span className="font-mono text-white">superadmin.html</span> tidak dapat diakses secara langsung tanpa login Superadmin terlebih dahulu. Mengarahkan ke halaman <span className="font-mono text-emerald-300">login.html</span>...
+            Halaman <span className="font-mono text-white">{pageMode === 'edit-jadwal' ? 'edit-jadwal.html' : 'superadmin.html'}</span> tidak dapat diakses secara langsung tanpa login Superadmin terlebih dahulu. Mengarahkan ke halaman <span className="font-mono text-emerald-300">login.html</span>...
           </p>
           <div className="pt-2">
             <a
@@ -458,13 +573,15 @@ export default function SuperAdminApp() {
 
   return (
     <div className="min-h-screen flex flex-col bg-[#F8FAFC] text-slate-900">
-      {/* Top Bar Contract for superadmin.html */}
+      {/* Top Bar Contract for superadmin.html / edit-jadwal.html */}
       <header className="sticky top-0 z-30 bg-slate-950 text-white border-b border-slate-800">
         <div className="max-w-[1200px] mx-auto px-6 py-4 flex items-center justify-between gap-8">
           <div className="flex items-center gap-2.5">
             <ShieldCheck className="w-5 h-5 text-emerald-400 shrink-0" />
             <span className="text-base font-bold tracking-tight font-display whitespace-nowrap">
-              Tadribul Lughah · File superadmin.html
+              {pageMode === 'edit-jadwal'
+                ? 'Tadribul Lughah · File edit-jadwal.html'
+                : 'Tadribul Lughah · File superadmin.html'}
             </span>
           </div>
 
@@ -474,21 +591,32 @@ export default function SuperAdminApp() {
             <span>PROTEKSI AKTIF</span>
           </div>
 
-          <a
-            href="./index.html"
-            className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-semibold text-white bg-emerald-800 hover:bg-emerald-700 rounded-lg transition-colors whitespace-nowrap shrink-0"
-          >
-            <span>Buka Halaman Utama (index.html)</span>
-            <ExternalLink className="w-3.5 h-3.5" />
-          </a>
+          {pageMode === 'edit-jadwal' ? (
+            <a
+              href="./superadmin.html?tab=schedules"
+              className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-semibold text-white bg-emerald-800 hover:bg-emerald-700 rounded-lg transition-colors whitespace-nowrap shrink-0"
+            >
+              <span>← Kembali ke Superadmin (superadmin.html)</span>
+            </a>
+          ) : (
+            <a
+              href="./index.html"
+              className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-semibold text-white bg-emerald-800 hover:bg-emerald-700 rounded-lg transition-colors whitespace-nowrap shrink-0"
+            >
+              <span>Buka Halaman Utama (index.html)</span>
+              <ExternalLink className="w-3.5 h-3.5" />
+            </a>
+          )}
         </div>
       </header>
 
       <main className="flex-1">
         <SuperAdminPanel
           isOpen={true}
+          pageMode={pageMode}
           onNavigateHome={() => {
-            window.location.href = './index.html';
+            window.location.href =
+              pageMode === 'edit-jadwal' ? './superadmin.html?tab=schedules' : './index.html';
           }}
           currentUser={effectiveUser}
           isSuperAdmin={true}

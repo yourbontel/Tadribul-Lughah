@@ -1,0 +1,8 @@
+{
+  "firestore": {
+    "databaseId": "ai-studio-mahadalbayanpend-9145f9b0-7fab-4d1c-851e-bbaa417a53b0",
+    "rules": "firestore.rules",
+    "edition": "ENTERPRISE",
+    "dataAccessMode": "FIRESTORE_NATIVE"
+  }
+}

@@ -15,19 +15,30 @@ import {
   RegistrationRecord,
   formatIDR,
   applyRegistrationOpenOverrides,
+  applyScheduleStartDateOverrides,
   saveProgramRegistrationOpenState,
-  saveProgramAngkatanState
+  saveProgramAngkatanState,
+  saveProgramStartDate,
+  saveProgramFullState,
+  saveScheduleOverride,
+  deleteScheduleOverride,
+  syncProgramStatesFromServer,
+  isScheduleRegistrationOpen,
+  isProgramHasAnyOpenSchedule
 } from './data/arabicAcademyData';
 import { RegistrationWorkspace } from './components/RegistrationWorkspace';
 import { SuperAdminPanel } from './components/SuperAdminPanel';
 import { CpanelDbConfig } from './utils/cpanelSqlGenerator';
 import {
-  buildCpanelReadyZipBlob,
   generateStandaloneLoginHtml,
   generateStandaloneStudentPortalHtml,
   generateStandaloneMateriHtml,
   generateStandaloneSuperAdminHtml
 } from './utils/cpanelZipBuilder';
+import {
+  cleanupStudentAccountAfterRegistrationDelete,
+  fetchServerRegistrations
+} from './utils/studentAccountStore';
 import {
   db,
   auth,
@@ -57,8 +68,7 @@ import {
   ArrowRight,
   BookOpen,
   ShieldCheck,
-  Calendar,
-  FolderArchive
+  Calendar
 } from 'lucide-react';
 
 const STORAGE_KEY = 'tadribul_lughah_registrations_v3';
@@ -69,16 +79,14 @@ export type PageRoute =
   | 'kurikulum'
   | 'jadwal'
   | 'pendaftaran'
-  | 'cek-status'
   | 'superadmin';
 
 function parseHashToPage(hash: string): PageRoute {
   const cleaned = hash.replace(/^#\/?/, '').toLowerCase();
   if (cleaned === 'kurikulum' || cleaned === 'program-studi') return 'kurikulum';
   if (cleaned === 'jadwal' || cleaned === 'jadwal-biaya') return 'jadwal';
-  if (cleaned === 'pendaftaran' || cleaned === 'formulir-pendaftaran')
+  if (cleaned === 'pendaftaran' || cleaned === 'formulir-pendaftaran' || cleaned === 'cek-status')
     return 'pendaftaran';
-  if (cleaned === 'cek-status') return 'cek-status';
   if (cleaned === 'superadmin' || cleaned === 'admin') return 'superadmin';
   return 'beranda';
 }
@@ -98,6 +106,35 @@ export default function App() {
     return () => window.removeEventListener('hashchange', onHashChange);
   }, []);
 
+  // Listen to program registration open / close (ON / OFF) state changes across tabs & cPanel server
+  useEffect(() => {
+    const sync = () => {
+      syncProgramStatesFromServer().catch(() => {});
+    };
+
+    sync();
+
+    const reloadOverrides = () => {
+      setPrograms((prev) => applyRegistrationOpenOverrides(prev));
+      setSchedules((prev) => applyScheduleStartDateOverrides(prev));
+    };
+
+    window.addEventListener('program-open-updated', reloadOverrides);
+    window.addEventListener('storage', reloadOverrides);
+    window.addEventListener('focus', sync);
+    document.addEventListener('visibilitychange', sync);
+
+    const interval = setInterval(sync, 6000);
+
+    return () => {
+      window.removeEventListener('program-open-updated', reloadOverrides);
+      window.removeEventListener('storage', reloadOverrides);
+      window.removeEventListener('focus', sync);
+      document.removeEventListener('visibilitychange', sync);
+      clearInterval(interval);
+    };
+  }, []);
+
   const navigateToPage = (page: PageRoute) => {
     setActivePage(page);
     try {
@@ -112,7 +149,9 @@ export default function App() {
   const [programs, setPrograms] = useState<ProgramTrack[]>(() =>
     applyRegistrationOpenOverrides(PROGRAM_TRACKS)
   );
-  const [schedules, setSchedules] = useState<ClassSchedule[]>(CLASS_SCHEDULES);
+  const [schedules, setSchedules] = useState<ClassSchedule[]>(() =>
+    applyScheduleStartDateOverrides(CLASS_SCHEDULES)
+  );
   const [publicRegistrations, setPublicRegistrations] = useState<
     RegistrationRecord[]
   >(() => {
@@ -206,6 +245,24 @@ export default function App() {
 
   // Test Firestore connection & listen to Auth state
   useEffect(() => {
+    fetchServerRegistrations()
+      .then((serverRegs) => {
+        if (serverRegs.length === 0) return;
+        setPublicRegistrations((prev) => {
+          const map = new Map<string, RegistrationRecord>();
+          for (const item of prev) {
+            if (item?.registrationNumber) {
+              map.set(item.registrationNumber.toUpperCase(), item);
+            }
+          }
+          for (const srv of serverRegs) {
+            const key = srv.registrationNumber.toUpperCase();
+            map.set(key, { ...(map.get(key) || {}), ...srv });
+          }
+          return Array.from(map.values());
+        });
+      })
+      .catch(() => {});
     testFirestoreConnection();
     const unsubAuth = onAuthStateChanged(auth, (user) => {
       setCurrentUser(user);
@@ -221,10 +278,10 @@ export default function App() {
         if (!snap.empty) {
           const loaded = snap.docs
             .map((d) =>
-              firestoreDocToProgram(d.data() as Record<string, unknown>)
+              firestoreDocToProgram(d.data() as Record<string, unknown>, d.id)
             )
             .sort((a, b) => a.levelNumber - b.levelNumber);
-          setPrograms(loaded);
+          setPrograms(applyRegistrationOpenOverrides(loaded));
         }
       },
       (error) => {
@@ -241,7 +298,7 @@ export default function App() {
               firestoreDocToSchedule(d.data() as Record<string, unknown>)
             )
             .sort((a, b) => a.levelNumber - b.levelNumber);
-          setSchedules(loaded);
+          setSchedules(applyScheduleStartDateOverrides(loaded));
         }
       },
       (error) => {
@@ -329,18 +386,39 @@ export default function App() {
   };
 
   const handleSaveProgram = async (prog: ProgramTrack) => {
-    saveProgramRegistrationOpenState(prog.id, prog.registrationOpen !== false);
-    saveProgramAngkatanState(prog.id, prog.angkatan || 'Angkatan 1');
+    saveProgramFullState(prog.id, {
+      registrationOpen: prog.registrationOpen !== false,
+      angkatan: prog.angkatan || 'Angkatan 1',
+      startDate: prog.startDate || '19 November 2026'
+    });
     setPrograms((prev) =>
       prev
         .map((p) => (p.id === prog.id ? prog : p))
         .sort((a, b) => a.levelNumber - b.levelNumber)
     );
+    setSchedules((prev) =>
+      prev.map((s) =>
+        s.programId === prog.id || s.levelNumber === prog.levelNumber
+          ? { ...s, startDate: prog.startDate || s.startDate }
+          : s
+      )
+    );
     await syncToCpanelMySql('program', prog);
+    const matchingSchedule = schedules.find(
+      (s) => s.programId === prog.id || s.levelNumber === prog.levelNumber
+    );
+    if (matchingSchedule && prog.startDate) {
+      const updatedSch = { ...matchingSchedule, startDate: prog.startDate };
+      await syncToCpanelMySql('schedule', updatedSch);
+    }
     const path = `programs/${prog.id}`;
     if (isUserSuperAdmin(currentUser)) {
       try {
         await setDoc(doc(db, 'programs', prog.id), programToFirestoreDoc(prog));
+        if (matchingSchedule && prog.startDate) {
+          const updatedSch = { ...matchingSchedule, startDate: prog.startDate };
+          await setDoc(doc(db, 'schedules', updatedSch.id), scheduleToFirestoreDoc(updatedSch));
+        }
       } catch (error) {
         handleFirestoreError(error, OperationType.WRITE, path);
       }
@@ -348,29 +426,35 @@ export default function App() {
   };
 
   const handleSaveSchedule = async (sch: ClassSchedule) => {
+    saveScheduleOverride(sch);
+    setSchedules((prev) => {
+      const exists = prev.some((s) => s.id === sch.id);
+      const updated = exists
+        ? prev.map((s) => (s.id === sch.id ? sch : s))
+        : [...prev, sch];
+      return applyScheduleStartDateOverrides(updated);
+    });
+    await syncToCpanelMySql('schedule', sch);
     const path = `schedules/${sch.id}`;
-    try {
-      await setDoc(doc(db, 'schedules', sch.id), scheduleToFirestoreDoc(sch));
-      await syncToCpanelMySql('schedule', sch);
-      setSchedules((prev) => {
-        const exists = prev.some((s) => s.id === sch.id);
-        const updated = exists
-          ? prev.map((s) => (s.id === sch.id ? sch : s))
-          : [...prev, sch];
-        return updated.sort((a, b) => a.levelNumber - b.levelNumber);
-      });
-    } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, path);
+    if (isUserSuperAdmin(currentUser)) {
+      try {
+        await setDoc(doc(db, 'schedules', sch.id), scheduleToFirestoreDoc(sch));
+      } catch (error) {
+        handleFirestoreError(error, OperationType.WRITE, path);
+      }
     }
   };
 
   const handleDeleteSchedule = async (scheduleId: string) => {
+    deleteScheduleOverride(scheduleId);
+    setSchedules((prev) => prev.filter((s) => s.id !== scheduleId));
     const path = `schedules/${scheduleId}`;
-    try {
-      await deleteDoc(doc(db, 'schedules', scheduleId));
-      setSchedules((prev) => prev.filter((s) => s.id !== scheduleId));
-    } catch (error) {
-      handleFirestoreError(error, OperationType.DELETE, path);
+    if (isUserSuperAdmin(currentUser)) {
+      try {
+        await deleteDoc(doc(db, 'schedules', scheduleId));
+      } catch (error) {
+        handleFirestoreError(error, OperationType.DELETE, path);
+      }
     }
   };
 
@@ -392,16 +476,47 @@ export default function App() {
   };
 
   const handleDeleteRegistration = async (registrationNumber: string) => {
+    const deletedRecord =
+      publicRegistrations.find((r) => r.registrationNumber === registrationNumber) ||
+      privateRegistrations.find((r) => r.registrationNumber === registrationNumber);
+    const remainingPublic = publicRegistrations.filter((r) => r.registrationNumber !== registrationNumber);
+    const remainingPrivate = privateRegistrations.filter((r) => r.registrationNumber !== registrationNumber);
+    const remainingAll =
+      isSuperAdmin && privateRegistrations.length > 0 ? remainingPrivate : remainingPublic;
+
+    // 1. Update React state & localStorage
+    setPublicRegistrations((prev) => {
+      const updated = prev.filter((r) => r.registrationNumber !== registrationNumber);
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
+        localStorage.setItem('tl_registrations_v1', JSON.stringify(updated));
+        window.dispatchEvent(new Event('storage'));
+      } catch {}
+      return updated;
+    });
+    setPrivateRegistrations((prev) =>
+      prev.filter((r) => r.registrationNumber !== registrationNumber)
+    );
+
+    // 2. Remove registration from student account, or delete account completely if no other registrations left
+    cleanupStudentAccountAfterRegistrationDelete(
+      registrationNumber,
+      deletedRecord?.email,
+      remainingAll
+    );
+
+    // 3. Delete from cPanel registrations.json
+    try {
+      fetch(`./api.php?entity=registrations&action=delete&key=${encodeURIComponent(registrationNumber)}`, {
+        method: 'POST'
+      }).catch(() => {});
+    } catch {}
+
+    // 4. Delete from Firestore
     const privatePath = `registrations/${registrationNumber}`;
     try {
       await deleteDoc(doc(db, 'registrations', registrationNumber));
       await deleteDoc(doc(db, 'registrationStatuses', registrationNumber));
-      setPublicRegistrations((prev) =>
-        prev.filter((r) => r.registrationNumber !== registrationNumber)
-      );
-      setPrivateRegistrations((prev) =>
-        prev.filter((r) => r.registrationNumber !== registrationNumber)
-      );
     } catch (error) {
       handleFirestoreError(error, OperationType.DELETE, privatePath);
     }
@@ -469,12 +584,22 @@ export default function App() {
     programCategoryFilter === 'all' ? true : p.category === programCategoryFilter
   );
 
-  const filteredSchedules = schedules.filter((s) => {
-    if (scheduleLevelFilter === 'all') return true;
-    if (scheduleLevelFilter === 'lv1') return s.levelNumber === 1;
-    if (scheduleLevelFilter === 'lv2') return s.levelNumber === 2;
-    return s.levelNumber === 3 || s.levelNumber === 4;
-  });
+  const filteredSchedules = schedules
+    .map((s) => {
+      const realCount = activeRegistrations.filter(
+        (r) =>
+          r.selectedScheduleId === s.id ||
+          (r.selectedScheduleSummary && r.selectedScheduleSummary.includes(s.batchCode)) ||
+          (!r.selectedScheduleId && r.selectedProgramId === s.programId)
+      ).length;
+      return { ...s, enrolled: realCount };
+    })
+    .filter((s) => {
+      if (scheduleLevelFilter === 'all') return true;
+      if (scheduleLevelFilter === 'lv1') return s.levelNumber === 1;
+      if (scheduleLevelFilter === 'lv2') return s.levelNumber === 2;
+      return s.levelNumber === 3 || s.levelNumber === 4;
+    });
 
   const primaryProgramTuition = programs[0]?.tuitionIDR || 85000;
 
@@ -482,8 +607,7 @@ export default function App() {
     { id: 'beranda', label: 'Beranda' },
     { id: 'kurikulum', label: 'Kurikulum' },
     { id: 'jadwal', label: 'Jadwal Malam' },
-    { id: 'pendaftaran', label: 'Pendaftaran' },
-    { id: 'cek-status', label: 'Cek Status' }
+    { id: 'pendaftaran', label: 'Pendaftaran' }
   ];
 
   return (
@@ -538,7 +662,7 @@ export default function App() {
               onClick={() => navigateToPage('pendaftaran')}
               className="px-4 py-2 text-xs font-semibold text-white bg-emerald-900 rounded-lg hover:bg-emerald-800 transition-colors whitespace-nowrap shrink-0"
             >
-              Daftar ({formatIDR(primaryProgramTuition)}/Level)
+              Daftar Program
             </button>
           </div>
         </div>
@@ -589,39 +713,13 @@ export default function App() {
                 'Halaman Jadwal Kelas Malam Online (20.00 – 22.00 WIB)'}
               {activePage === 'pendaftaran' &&
                 'Halaman Formulir Pendaftaran Online'}
-              {activePage === 'cek-status' &&
-                'Halaman Cek Status & Direktori Peserta'}
               {activePage === 'superadmin' &&
                 'Halaman Khusus Superadmin & Database SQL cPanel'}
             </span>
           </div>
 
-          {/* Quick Download .ZIP cPanel & Dedicated Superadmin Page Trigger */}
+          {/* Dedicated Superadmin Page Trigger & Student Portal */}
           <div className="flex flex-wrap items-center gap-2 ml-auto">
-            <button
-              type="button"
-              onClick={() => {
-                const zipBlob = buildCpanelReadyZipBlob(
-                  programs,
-                  schedules,
-                  activeRegistrations,
-                  cpanelConfig
-                );
-                const url = URL.createObjectURL(zipBlob);
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = 'tadribul_lughah_cpanel_siap_upload.zip';
-                document.body.appendChild(a);
-                a.click();
-                document.body.removeChild(a);
-                URL.revokeObjectURL(url);
-              }}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-slate-900 rounded-md hover:bg-emerald-900 transition-colors whitespace-nowrap shrink-0"
-            >
-              <FolderArchive className="w-3.5 h-3.5" />
-              Unduh Website .ZIP (Siap Upload cPanel)
-            </button>
-
             <a
               href="/pelajar.html"
               className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-md bg-emerald-900 text-white hover:bg-emerald-800 transition-colors whitespace-nowrap shrink-0"
@@ -664,10 +762,7 @@ export default function App() {
                         <span aria-hidden="true">·</span>
                         <span>Kelas Malam 20.00 – 22.00 WIB</span>
                         <span aria-hidden="true">·</span>
-                        <span>
-                          {formatIDR(primaryProgramTuition)} / Level (Cicilan 6x{' '}
-                          {formatIDR(Math.round(primaryProgramTuition / 6))}/bln)
-                        </span>
+                        <span>Live Interaktif & Rekaman</span>
                       </div>
 
                       <p
@@ -684,32 +779,35 @@ export default function App() {
                       <p className="mt-5 text-base text-slate-600 leading-relaxed max-w-xl">
                         Kurikulum bahasa Arab berjenjang yang dilaksanakan secara{' '}
                         <strong>Online Live Interaktif</strong> khusus di{' '}
-                        <strong>malam hari pukul 20.00 – 22.00 WIB</strong>{' '}
-                        dengan biaya{' '}
-                        <strong>
-                          {formatIDR(primaryProgramTuition)} per level
-                        </strong>{' '}
-                        (bisa dicicil per bulan dibagi 6x yaitu{' '}
-                        <strong>
-                          {formatIDR(Math.round(primaryProgramTuition / 6))} / bulan
-                        </strong>
-                        ). Menuntaskan kaidah kalimat pada{' '}
-                        <strong>Level 1–3 (Nahwu)</strong> dan perubahan bentuk
-                        kata pada <strong>Level 4 (Shorof)</strong>.
+                        <strong>malam hari pukul 20.00 – 22.00 WIB</strong>. Menuntaskan kaidah kalimat pada{' '}
+                        <strong>Level 1–3 (Nahwu)</strong> dan perubahan bentuk kata pada <strong>Level 4 (Shorof)</strong>. Rincian biaya pendidikan dan opsi cicilan dapat dilihat langsung pada bagian pendaftaran.
                       </p>
                     </div>
 
                     {/* Single Dominant CTA + Secondary Page Exploration Links */}
                     <div className="mt-8 pt-6 border-t border-slate-200">
                       <div className="flex flex-wrap items-center gap-4">
-                        <button
-                          type="button"
-                          onClick={() => navigateToPage('pendaftaran')}
-                          className="inline-flex items-center gap-2 px-6 py-3.5 text-sm font-semibold text-white bg-emerald-900 rounded-lg hover:bg-emerald-800 transition-colors whitespace-nowrap shrink-0"
-                        >
-                          Daftar Sekarang — {formatIDR(primaryProgramTuition)} / Level
-                          <ArrowRight className="w-4 h-4" />
-                        </button>
+                        {programs[0] && !isProgramHasAnyOpenSchedule(programs[0], schedules) ? (
+                          <button
+                            type="button"
+                            onClick={() => navigateToPage('pendaftaran')}
+                            className="inline-flex items-center gap-2 px-6 py-3.5 text-sm font-semibold text-white bg-slate-900 rounded-lg hover:bg-emerald-900 transition-colors whitespace-nowrap shrink-0"
+                          >
+                            {programs.some((p) => isProgramHasAnyOpenSchedule(p, schedules))
+                              ? 'Pilih Level Pendaftaran Tersedia'
+                              : 'Pendaftaran Ditutup (OFF)'}
+                            <ArrowRight className="w-4 h-4" />
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => navigateToPage('pendaftaran')}
+                            className="inline-flex items-center gap-2 px-6 py-3.5 text-sm font-semibold text-white bg-emerald-900 rounded-lg hover:bg-emerald-800 transition-colors whitespace-nowrap shrink-0"
+                          >
+                            Daftar Sekarang
+                            <ArrowRight className="w-4 h-4" />
+                          </button>
+                        )}
 
                         <button
                           type="button"
@@ -762,8 +860,7 @@ export default function App() {
                     {/* Measured Contrast Scrim for Media Overlay */}
                     <div className="relative z-10 bg-gradient-to-t from-black/85 via-black/45 to-transparent p-6 sm:p-8 pt-20 text-white">
                       <p className="text-xs font-mono text-emerald-300">
-                        KELAS MALAM ONLINE (20.00 – 22.00 WIB) ·{' '}
-                        {formatIDR(primaryProgramTuition).toUpperCase()} PER LEVEL
+                        KELAS MALAM ONLINE (20.00 – 22.00 WIB) · LIVE INTERAKTIF
                       </p>
                       <p className="text-base sm:text-lg font-medium mt-1 leading-snug">
                         Waktu belajar malam hari yang kondusif melalui sesi live interaktif beserta modul PDF dan rekaman ulang setiap pertemuan.
@@ -801,7 +898,7 @@ export default function App() {
                           · {prog.title}
                         </p>
                       </div>
-                      {prog.registrationOpen === false ? (
+                      {!isProgramHasAnyOpenSchedule(prog, schedules) ? (
                         <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-rose-700">
                           Pendaftaran Level {prog.levelNumber} Ditutup (OFF)
                         </span>
@@ -811,7 +908,7 @@ export default function App() {
                           onClick={() => handleChooseProgram(prog.id)}
                           className="inline-flex items-center gap-1.5 text-xs font-semibold text-emerald-900 hover:underline underline-offset-4 w-fit"
                         >
-                          Daftar Level {prog.levelNumber} ({formatIDR(prog.tuitionIDR)})
+                          Daftar Level {prog.levelNumber}
                           <ArrowRight className="w-3.5 h-3.5" />
                         </button>
                       )}
@@ -835,7 +932,7 @@ export default function App() {
                   </div>
                 </div>
 
-                <div className="mt-8 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                <div className="mt-8 grid grid-cols-1 md:grid-cols-3 gap-6">
                   {/* Card 1: Halaman Kurikulum */}
                   <div className="bg-white border border-slate-200 rounded-xl p-6 flex flex-col justify-between space-y-6">
                     <div className="space-y-2.5">
@@ -892,7 +989,7 @@ export default function App() {
                         Formulir Daftar & Kartu Peserta
                       </h3>
                       <p className="text-xs text-slate-600 leading-relaxed">
-                        Isi formulir pendaftaran online ({formatIDR(primaryProgramTuition)} / level) dan dapatkan Kartu Peserta Digital secara instan.
+                        Isi formulir pendaftaran online untuk melihat rincian biaya pendidikan dan dapatkan Kartu Peserta Digital secara instan.
                       </p>
                     </div>
                     <button
@@ -901,29 +998,6 @@ export default function App() {
                       className="inline-flex items-center justify-between w-full px-4 py-2.5 text-xs font-semibold text-white bg-emerald-900 hover:bg-emerald-800 rounded-lg transition-colors"
                     >
                       <span>Buka Formulir Pendaftaran</span>
-                      <ArrowRight className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-
-                  {/* Card 4: Halaman Cek Status */}
-                  <div className="bg-white border border-slate-200 rounded-xl p-6 flex flex-col justify-between space-y-6">
-                    <div className="space-y-2.5">
-                      <span className="text-xs font-mono font-semibold text-emerald-800">
-                        04. HALAMAN CEK STATUS
-                      </span>
-                      <h3 className="text-lg font-semibold text-slate-900">
-                        Verifikasi Nomor Registrasi ({activeRegistrations.length})
-                      </h3>
-                      <p className="text-xs text-slate-600 leading-relaxed">
-                        Cek status verifikasi pendaftaran peserta menggunakan Nomor Registrasi (TL-2026-xxxx) dan unduh ulang bukti daftar.
-                      </p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => navigateToPage('cek-status')}
-                      className="inline-flex items-center justify-between w-full px-4 py-2.5 text-xs font-semibold text-slate-900 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors"
-                    >
-                      <span>Buka Halaman Cek Status</span>
                       <ArrowRight className="w-3.5 h-3.5" />
                     </button>
                   </div>
@@ -1021,13 +1095,7 @@ export default function App() {
                   </h1>
                   <p className="mt-2 text-sm sm:text-base text-slate-600 max-w-2xl">
                     Seluruh kelas dilaksanakan secara Online pada malam hari (
-                    <strong>20.00 – 22.00 WIB</strong>) dengan biaya{' '}
-                    <strong>{formatIDR(primaryProgramTuition)} per level</strong>{' '}
-                    (bisa dicicil per bulan dibagi 6:{' '}
-                    <strong>
-                      {formatIDR(Math.round(primaryProgramTuition / 6))} / bulan
-                    </strong>
-                    ).
+                    <strong>20.00 – 22.00 WIB</strong>). Rincian biaya pendidikan dan skema cicilan dapat dilihat langsung pada bagian pendaftaran.
                   </p>
                 </div>
 
@@ -1288,20 +1356,14 @@ export default function App() {
                               index <= 3 ? 'text-slate-600' : 'text-slate-500'
                             }`}
                           >
-                            Biaya Pendidikan (Bisa Dicicil 6x Per Bulan)
+                            Informasi Biaya Pendidikan
                           </span>
-                          <span className="text-lg font-bold font-mono tabular-nums text-slate-900">
-                            {formatIDR(prog.tuitionIDR)}{' '}
-                            <span className="text-xs font-normal text-slate-500">
-                              / level
-                            </span>
-                          </span>
-                          <span className="text-[11px] font-mono text-emerald-900 font-semibold block mt-0.5">
-                            Cicilan: {formatIDR(Math.round(prog.tuitionIDR / 6))} / bulan (× 6 bulan)
+                          <span className="text-xs font-semibold text-emerald-950 mt-1 block">
+                            Rincian biaya & cicilan di bagian pendaftaran
                           </span>
                         </div>
 
-                        {prog.registrationOpen === false ? (
+                        {!isProgramHasAnyOpenSchedule(prog, schedules) ? (
                           <button
                             type="button"
                             disabled
@@ -1357,7 +1419,7 @@ export default function App() {
               <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-6 pb-10 border-b border-slate-200">
                 <div>
                   <p className="text-xs font-medium text-emerald-800 tracking-wide mb-2">
-                    Halaman Jadwal Kelas Online Malam & Biaya Pendaftaran
+                    Halaman Jadwal Kelas Online Malam
                   </p>
                   <h1 className="text-2xl sm:text-3xl lg:text-4xl font-semibold text-slate-900 tracking-tight">
                     Jadwal Kelas Online Tadribul Lughah (20.00 – 22.00 WIB)
@@ -1423,7 +1485,6 @@ export default function App() {
                       <th className="py-3.5 px-4">Moda & Pengajar</th>
                       <th className="py-3.5 px-4">Hari & Jam Malam (WIB)</th>
                       <th className="py-3.5 px-4">Sisa Kuota</th>
-                      <th className="py-3.5 px-4">Biaya / Level</th>
                       <th className="py-3.5 pl-4 pr-6 text-right">
                         Pendaftaran
                       </th>
@@ -1480,17 +1541,11 @@ export default function App() {
                               Terisi {sch.enrolled}/{sch.capacity}
                             </span>
                           </td>
-                          <td className="py-4 px-4 font-mono tabular-nums whitespace-nowrap">
-                            <span className="font-semibold text-slate-900 block">
-                              {formatIDR(sch.feeIDR)} / level
-                            </span>
-                            <span className="text-emerald-800 font-medium text-[11px]">
-                              Cicilan 6x: {formatIDR(Math.round(sch.feeIDR / 6))}/bln
-                            </span>
-                          </td>
                           <td className="py-4 pl-4 pr-6 text-right whitespace-nowrap">
-                            {programs.find((p) => p.id === sch.programId)
-                              ?.registrationOpen === false ? (
+                            {!isScheduleRegistrationOpen(
+                              sch,
+                              programs.find((p) => p.id === sch.programId)
+                            ) ? (
                               <button
                                 type="button"
                                 disabled
@@ -1551,13 +1606,13 @@ export default function App() {
 
                 <div className="p-6 bg-slate-50 border border-slate-200 rounded-xl space-y-2">
                   <p className="text-xs font-mono font-semibold text-emerald-800">
-                    03. BIAYA BISA DICICIL 6 BULAN
+                    03. INFORMASI BIAYA & CICILAN
                   </p>
                   <h2 className="text-base font-semibold text-slate-900">
-                    {formatIDR(primaryProgramTuition)} / Level ({formatIDR(Math.round(primaryProgramTuition / 6))} / Bulan × 6)
+                    Diinformasikan di Halaman Pendaftaran
                   </h2>
                   <p className="text-xs text-slate-600 leading-relaxed">
-                    Biaya per level sebesar {formatIDR(primaryProgramTuition)} dapat dicicil per bulan dibagi 6 ({formatIDR(Math.round(primaryProgramTuition / 6))} per bulan), sudah mencakup modul PDF dan evaluasi kenaikan level.
+                    Rincian biaya pendidikan dan pilihan skema cicilan dapat dilihat secara lengkap pada bagian formulir pendaftaran saat memilih level dan jadwal belajar.
                   </p>
                 </div>
               </div>
@@ -1566,9 +1621,9 @@ export default function App() {
         )}
 
         {/* =====================================================================
-            HALAMAN 4 & 5: FORMULIR PENDAFTARAN & CEK STATUS PENDAFTAR
+            HALAMAN 4: FORMULIR PENDAFTARAN MAHASISWA BARU
            ===================================================================== */}
-        {(activePage === 'pendaftaran' || activePage === 'cek-status') && (
+        {activePage === 'pendaftaran' && (
           <RegistrationWorkspace
             programs={programs}
             schedules={schedules}
@@ -1578,7 +1633,7 @@ export default function App() {
             onSelectProgram={setSelectedProgramId}
             onSelectSchedule={setSelectedScheduleId}
             onSubmitRegistration={handleAddRegistration}
-            mode={activePage === 'pendaftaran' ? 'form' : 'lookup'}
+            mode="form"
             onNavigatePage={navigateToPage}
           />
         )}
@@ -1657,7 +1712,7 @@ export default function App() {
                 بَرْنَامَجُ تَدْرِيبِ اللُّغَةِ العَرَبِيَّةِ — النَّحْوُ وَالصَّرْفُ
               </p>
               <p className="text-xs text-slate-400 leading-relaxed max-w-sm">
-                Kurikulum Pembelajaran Bahasa Arab Online Terstruktur: Level 1–3 Ilmu Nahwu dan Level 4 Ilmu Shorof ({formatIDR(primaryProgramTuition)} / Level).
+                Kurikulum Pembelajaran Bahasa Arab Online Terstruktur: Level 1–3 Ilmu Nahwu dan Level 4 Ilmu Shorof. Rincian biaya pendidikan diinformasikan pada formulir pendaftaran.
               </p>
             </div>
 

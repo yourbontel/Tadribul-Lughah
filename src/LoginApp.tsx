@@ -11,12 +11,13 @@ import {
 } from './firebase';
 import {
   authenticateStudentCredentials,
-  activateStudentAccountForRegisteredLearner,
   setActiveStudentSession,
   getActiveStudentSession,
   clearActiveStudentSession,
   getStudentAccounts,
-  loadMergedRegistrations
+  loadMergedRegistrations,
+  syncStudentAccountsFromServer,
+  syncRegistrationsFromServer
 } from './utils/studentAccountStore';
 import {
   ShieldCheck,
@@ -26,15 +27,12 @@ import {
   AlertCircle,
   CheckCircle2,
   LogOut,
-  GraduationCap,
-  UserPlus,
-  KeyRound
+  GraduationCap
 } from 'lucide-react';
 
 export const SUPERADMIN_SESSION_KEY = 'tl_superadmin_verified_session_v1';
 
 type LoginPortalRole = 'pelajar' | 'superadmin';
-type StudentAuthSubMode = 'login' | 'activate';
 
 export default function LoginApp() {
   const [portalRole, setPortalRole] = useState<LoginPortalRole>(() => {
@@ -45,9 +43,6 @@ export default function LoginApp() {
     return 'pelajar';
   });
 
-  const [studentSubMode, setStudentSubMode] =
-    useState<StudentAuthSubMode>('login');
-
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [authChecking, setAuthChecking] = useState<boolean>(true);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
@@ -56,28 +51,33 @@ export default function LoginApp() {
   const [studentIdentifier, setStudentIdentifier] = useState<string>('');
   const [studentPassword, setStudentPassword] = useState<string>('');
 
-  // Student Account Activation Inputs (for registered students creating their account)
-  const [activateRegNo, setActivateRegNo] = useState<string>('');
-  const [activateEmail, setActivateEmail] = useState<string>('');
-  const [activatePassword, setActivatePassword] = useState<string>('');
-
   // Superadmin Inputs
   const [emailInput, setEmailInput] = useState<string>('');
   const [passwordInput, setPasswordInput] = useState<string>('');
 
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
-  const [redirectTarget, setRedirectTarget] = useState<
-    'superadmin.html' | 'pelajar.html' | null
-  >(null);
+  const [redirectTarget, setRedirectTarget] = useState<string | null>(null);
 
   const redirectToSuperAdminPage = () => {
-    setRedirectTarget('superadmin.html');
+    let target = './superadmin.html';
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      const redirectParam = params.get('redirect');
+      if (
+        redirectParam &&
+        !redirectParam.startsWith('http') &&
+        (redirectParam.includes('edit-jadwal.html') || redirectParam.includes('superadmin.html'))
+      ) {
+        target = redirectParam.startsWith('./') ? redirectParam : `./${redirectParam}`;
+      }
+    }
+    setRedirectTarget(target.replace(/^\.\//, ''));
     try {
       sessionStorage.setItem(SUPERADMIN_SESSION_KEY, SUPERADMIN_EMAIL);
     } catch {
       // Ignore storage errors
     }
-    window.location.replace('./superadmin.html');
+    window.location.replace(target);
   };
 
   const redirectToStudentPortalPage = (
@@ -85,17 +85,29 @@ export default function LoginApp() {
     email: string,
     fullName: string
   ) => {
-    setRedirectTarget('pelajar.html');
+    let target = './pelajar.html';
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      const redirectParam = params.get('redirect');
+      if (redirectParam && !redirectParam.startsWith('http') && redirectParam.includes('pelajar.html')) {
+        target = redirectParam.startsWith('./') ? redirectParam : `./${redirectParam}`;
+      }
+    }
+    setRedirectTarget(target);
     setActiveStudentSession({
       registrationNumber: regNo,
       email,
       fullName,
       loginAt: new Date().toISOString()
     });
-    window.location.replace('./pelajar.html');
+    window.location.replace(target);
   };
 
   useEffect(() => {
+    // Sinkronkan akun & registrasi santri dari server cPanel di latar belakang
+    syncStudentAccountsFromServer().catch(() => {});
+    syncRegistrationsFromServer().catch(() => {});
+
     // Check if Superadmin session is already active when on superadmin tab
     try {
       const savedSuperSession = sessionStorage.getItem(SUPERADMIN_SESSION_KEY);
@@ -110,12 +122,23 @@ export default function LoginApp() {
 
       const savedStudentSession = getActiveStudentSession();
       if (portalRole === 'pelajar' && savedStudentSession) {
-        redirectToStudentPortalPage(
-          savedStudentSession.registrationNumber,
-          savedStudentSession.email,
-          savedStudentSession.fullName
+        const accounts = getStudentAccounts();
+        const isValid = accounts.some(
+          (a) =>
+            a.registrationNumber.toUpperCase() ===
+              savedStudentSession.registrationNumber.toUpperCase() ||
+            a.email.toLowerCase() === savedStudentSession.email.toLowerCase()
         );
-        return;
+        if (isValid) {
+          redirectToStudentPortalPage(
+            savedStudentSession.registrationNumber,
+            savedStudentSession.email,
+            savedStudentSession.fullName
+          );
+          return;
+        } else {
+          clearActiveStudentSession();
+        }
       }
     } catch {
       // Ignore
@@ -153,6 +176,11 @@ export default function LoginApp() {
       }
 
       // 2. If logging in as Pelajar via Google, check if email is registered & has a student account
+      try {
+        await syncStudentAccountsFromServer();
+        await syncRegistrationsFromServer();
+      } catch {}
+
       const accounts = getStudentAccounts();
       const regs = loadMergedRegistrations();
       const matchedAcc = accounts.find(
@@ -166,15 +194,15 @@ export default function LoginApp() {
               matchedAcc.registrationNumber.toUpperCase())
       );
 
-      if (matchedAcc && matchedReg) {
+      if (matchedAcc) {
         redirectToStudentPortalPage(
-          matchedReg.registrationNumber,
+          matchedReg?.registrationNumber || matchedAcc.registrationNumber,
           matchedAcc.email,
-          matchedReg.fullName
+          matchedReg?.fullName || matchedAcc.fullName
         );
       } else {
         setErrorMsg(
-          `Akun Google ${result.user.email} belum terdaftar sebagai pelajar Tadribul Lughah atau belum memiliki akun pelajar. Silakan daftar program terlebih dahulu di halaman Pendaftaran atau aktivasi akun dengan Nomor Registrasi Anda.`
+          `Akun Google ${result.user.email} belum terdaftar sebagai pelajar Tadribul Lughah atau belum memiliki akun pelajar. Silakan daftar program terlebih dahulu di halaman Pendaftaran.`
         );
       }
     } catch (err) {
@@ -186,9 +214,10 @@ export default function LoginApp() {
     }
   };
 
-  const handleStudentLoginSubmit = (e: React.FormEvent) => {
+  const handleStudentLoginSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg(null);
+    setIsSubmitting(true);
 
     const cleanedId = studentIdentifier.trim();
     const cleanedPass = studentPassword.trim();
@@ -202,9 +231,17 @@ export default function LoginApp() {
       return;
     }
 
+    try {
+      await syncStudentAccountsFromServer();
+      await syncRegistrationsFromServer();
+    } catch {
+      // Ignore
+    }
+
     const authResult = authenticateStudentCredentials(cleanedId, cleanedPass);
     if (!authResult.ok) {
       setErrorMsg(authResult.reason);
+      setIsSubmitting(false);
       return;
     }
 
@@ -212,28 +249,6 @@ export default function LoginApp() {
       authResult.registration.registrationNumber,
       authResult.account.email,
       authResult.registration.fullName
-    );
-  };
-
-  const handleStudentActivationSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    setErrorMsg(null);
-
-    const result = activateStudentAccountForRegisteredLearner({
-      registrationNumber: activateRegNo,
-      email: activateEmail,
-      password: activatePassword
-    });
-
-    if (!result.ok) {
-      setErrorMsg(result.reason);
-      return;
-    }
-
-    redirectToStudentPortalPage(
-      result.registration.registrationNumber,
-      result.account.email,
-      result.registration.fullName
     );
   };
 
@@ -401,192 +416,92 @@ export default function LoginApp() {
                    ========================================================= */}
                 {portalRole === 'pelajar' && (
                   <div className="space-y-5">
-                    {/* Sub-mode Switcher: Masuk Akun vs Aktivasi Akun Pelajar */}
-                    <div className="flex items-center gap-2 border-b border-slate-200 pb-3">
+                    <form
+                      onSubmit={handleStudentLoginSubmit}
+                      className="space-y-4"
+                    >
+                      <div>
+                        <label
+                          htmlFor="student-id-input"
+                          className="block text-xs font-semibold text-slate-800 mb-1"
+                        >
+                          Email Pelajar Terdaftar / Nomor Registrasi *
+                        </label>
+                        <input
+                          id="student-id-input"
+                          type="text"
+                          required
+                          value={studentIdentifier}
+                          onChange={(e) =>
+                            setStudentIdentifier(e.target.value)
+                          }
+                          placeholder="Contoh: TL-2026-8419 atau email Anda"
+                          className="w-full px-3.5 py-2.5 text-sm bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-emerald-800"
+                        />
+                      </div>
+
+                      <div>
+                        <label
+                          htmlFor="student-pass-input"
+                          className="block text-xs font-semibold text-slate-800 mb-1"
+                        >
+                          Kata Sandi Akun Pelajar *
+                        </label>
+                        <input
+                          id="student-pass-input"
+                          type="password"
+                          required
+                          value={studentPassword}
+                          onChange={(e) =>
+                            setStudentPassword(e.target.value)
+                          }
+                          placeholder="Masukkan kata sandi akun pelajar"
+                          className="w-full px-3.5 py-2.5 text-sm bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-emerald-800"
+                        />
+                      </div>
+
                       <button
-                        type="button"
-                        onClick={() => {
-                          setStudentSubMode('login');
-                          setErrorMsg(null);
-                        }}
-                        className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-colors ${
-                          studentSubMode === 'login'
-                            ? 'bg-emerald-900 text-white'
-                            : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
-                        }`}
+                        type="submit"
+                        className="w-full inline-flex items-center justify-center gap-2 px-5 py-3 text-xs font-semibold text-white bg-emerald-900 hover:bg-emerald-800 rounded-lg transition-colors"
                       >
-                        Sudah Punya Akun Pelajar
+                        <GraduationCap className="w-4 h-4" />
+                        <span>Masuk ke Halaman Pelajar (pelajar.html)</span>
                       </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setStudentSubMode('activate');
-                          setErrorMsg(null);
-                        }}
-                        className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-colors inline-flex items-center gap-1.5 ${
-                          studentSubMode === 'activate'
-                            ? 'bg-emerald-900 text-white'
-                            : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
-                        }`}
-                      >
-                        <UserPlus className="w-3.5 h-3.5" />
-                        <span>Aktivasi / Buat Akun Pelajar</span>
-                      </button>
+                    </form>
+
+                    {/* Quick Fill Registered Student Accounts for Easy Testing */}
+                    <div className="p-3.5 rounded-lg bg-[#FBF9F5] border border-slate-200 space-y-2.5">
+                      <p className="text-[11px] font-mono uppercase tracking-wider text-slate-600 font-semibold">
+                        Pilih Cepat Akun Pelajar yang Sudah Terdaftar:
+                      </p>
+                      <div className="flex flex-wrap gap-1.5">
+                        {sampleAccounts.map((acc) => {
+                          const isMulti = (acc.enrolledRegistrationNumbers?.length || 0) > 1;
+                          return (
+                            <button
+                              key={acc.registrationNumber}
+                              type="button"
+                              onClick={() => {
+                                setStudentIdentifier(acc.email);
+                                setStudentPassword(acc.password);
+                                setErrorMsg(null);
+                              }}
+                              className={`px-2.5 py-1.5 text-[11px] font-mono rounded-md transition-all cursor-pointer ${
+                                isMulti
+                                  ? 'bg-emerald-100 border border-emerald-400 text-emerald-950 font-bold hover:bg-emerald-200 shadow-2xs'
+                                  : 'bg-white border border-slate-300 hover:border-emerald-800 text-slate-800'
+                              }`}
+                              title={isMulti ? 'Akun Demo: Sudah pernah menyelesaikan Level 1 di Angkatan 1 & terdaftar kembali di Angkatan 2' : undefined}
+                            >
+                              {acc.registrationNumber} ({acc.fullName.split(' ')[0]}{isMulti ? ' · Demo Lv 1 2x' : ''})
+                            </button>
+                          );
+                        })}
+                      </div>
+                      <p className="text-[11px] text-slate-500 leading-normal pt-1 border-t border-slate-200">
+                        💡 <strong>Akun Demo 2x Lv 1:</strong> Pilih <strong>TL-2026-8452 (Siti · Demo Lv 1 2x)</strong> untuk melihat akun yang sudah lunas & tuntas di Angkatan 1, serta terdaftar aktif di Angkatan 2.
+                      </p>
                     </div>
-
-                    {studentSubMode === 'login' ? (
-                      <>
-                        <form
-                          onSubmit={handleStudentLoginSubmit}
-                          className="space-y-4"
-                        >
-                          <div>
-                            <label
-                              htmlFor="student-id-input"
-                              className="block text-xs font-semibold text-slate-800 mb-1"
-                            >
-                              Email Pelajar Terdaftar / Nomor Registrasi *
-                            </label>
-                            <input
-                              id="student-id-input"
-                              type="text"
-                              required
-                              value={studentIdentifier}
-                              onChange={(e) =>
-                                setStudentIdentifier(e.target.value)
-                              }
-                              placeholder="Contoh: TL-2026-8419 atau email Anda"
-                              className="w-full px-3.5 py-2.5 text-sm bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-emerald-800"
-                            />
-                          </div>
-
-                          <div>
-                            <label
-                              htmlFor="student-pass-input"
-                              className="block text-xs font-semibold text-slate-800 mb-1"
-                            >
-                              Kata Sandi Akun Pelajar *
-                            </label>
-                            <input
-                              id="student-pass-input"
-                              type="password"
-                              required
-                              value={studentPassword}
-                              onChange={(e) =>
-                                setStudentPassword(e.target.value)
-                              }
-                              placeholder="Masukkan kata sandi akun pelajar"
-                              className="w-full px-3.5 py-2.5 text-sm bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-emerald-800"
-                            />
-                          </div>
-
-                          <button
-                            type="submit"
-                            className="w-full inline-flex items-center justify-center gap-2 px-5 py-3 text-xs font-semibold text-white bg-emerald-900 hover:bg-emerald-800 rounded-lg transition-colors"
-                          >
-                            <GraduationCap className="w-4 h-4" />
-                            <span>Masuk ke Halaman Pelajar (pelajar.html)</span>
-                          </button>
-                        </form>
-
-                        {/* Quick Fill Registered Student Accounts for Easy Testing */}
-                        <div className="p-3.5 rounded-lg bg-[#FBF9F5] border border-slate-200 space-y-2">
-                          <p className="text-[11px] font-mono uppercase tracking-wider text-slate-600 font-semibold">
-                            Pilih Cepat Akun Pelajar yang Sudah Terdaftar:
-                          </p>
-                          <div className="flex flex-wrap gap-1.5">
-                            {sampleAccounts.map((acc) => (
-                              <button
-                                key={acc.registrationNumber}
-                                type="button"
-                                onClick={() => {
-                                  setStudentIdentifier(acc.email);
-                                  setStudentPassword(acc.password);
-                                  setErrorMsg(null);
-                                }}
-                                className="px-2.5 py-1.5 text-[11px] font-mono bg-white border border-slate-300 hover:border-emerald-800 rounded-md text-slate-800 transition-colors"
-                              >
-                                {acc.registrationNumber} ({acc.fullName.split(' ')[0]})
-                              </button>
-                            ))}
-                          </div>
-                        </div>
-                      </>
-                    ) : (
-                      /* Activate / Create Account for Registered Students */
-                      <form
-                        onSubmit={handleStudentActivationSubmit}
-                        className="space-y-4"
-                      >
-                        <div className="p-3.5 rounded-lg bg-emerald-50/70 border border-emerald-200 text-xs text-slate-700 leading-relaxed">
-                          Khusus bagi pelajar yang <strong>sudah terdaftar</strong> di Tadribul Lughah: masukkan <strong>Nomor Registrasi</strong> dan <strong>Email</strong> yang Anda gunakan saat mendaftar untuk membuat kata sandi akun <span className="font-mono">pelajar.html</span>.
-                        </div>
-
-                        <div>
-                          <label
-                            htmlFor="activate-reg-no"
-                            className="block text-xs font-semibold text-slate-800 mb-1"
-                          >
-                            Nomor Registrasi Peserta Terdaftar *
-                          </label>
-                          <input
-                            id="activate-reg-no"
-                            type="text"
-                            required
-                            value={activateRegNo}
-                            onChange={(e) => setActivateRegNo(e.target.value)}
-                            placeholder="Contoh: TL-2026-8419"
-                            className="w-full px-3.5 py-2.5 text-sm font-mono bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-emerald-800"
-                          />
-                        </div>
-
-                        <div>
-                          <label
-                            htmlFor="activate-email"
-                            className="block text-xs font-semibold text-slate-800 mb-1"
-                          >
-                            Email Aktif Saat Pendaftaran *
-                          </label>
-                          <input
-                            id="activate-email"
-                            type="email"
-                            required
-                            value={activateEmail}
-                            onChange={(e) => setActivateEmail(e.target.value)}
-                            placeholder="nama@email.com"
-                            className="w-full px-3.5 py-2.5 text-sm bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-emerald-800"
-                          />
-                        </div>
-
-                        <div>
-                          <label
-                            htmlFor="activate-pass"
-                            className="block text-xs font-semibold text-slate-800 mb-1"
-                          >
-                            Buat Kata Sandi Akun Pelajar (Min. 6 Karakter) *
-                          </label>
-                          <input
-                            id="activate-pass"
-                            type="password"
-                            required
-                            value={activatePassword}
-                            onChange={(e) =>
-                              setActivatePassword(e.target.value)
-                            }
-                            placeholder="Minimal 6 karakter"
-                            className="w-full px-3.5 py-2.5 text-sm bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-emerald-800"
-                          />
-                        </div>
-
-                        <button
-                          type="submit"
-                          className="w-full inline-flex items-center justify-center gap-2 px-5 py-3 text-xs font-semibold text-white bg-emerald-900 hover:bg-emerald-800 rounded-lg transition-colors"
-                        >
-                          <KeyRound className="w-4 h-4" />
-                          <span>Aktifkan Akun & Buka pelajar.html</span>
-                        </button>
-                      </form>
-                    )}
 
                     <div className="pt-2 border-t border-slate-200 flex items-center justify-between text-xs text-slate-600">
                       <span>Belum mendaftar program?</span>

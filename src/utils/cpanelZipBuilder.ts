@@ -1743,6 +1743,7 @@ export function generateStandaloneMateriHtml(
 
       const sessionRaw = sessionStorage.getItem('tl_student_verified_session_v1');
       const session = JSON.parse(sessionRaw || '{}');
+      const isSuperAdmin = sessionStorage.getItem('tl_superadmin_verified_session_v1') === 'mazharhajid@gmail.com';
       const regs = JSON.parse(localStorage.getItem('tl_cpanel_registrations')) || INITIAL_DATA.registrations;
       const myRegs = regs.filter(r => (r.email || '').toLowerCase() === (session.email || '').toLowerCase() || r.registrationNumber === session.registrationNumber);
       const myEnrolledIds = myRegs.map(r => r.selectedProgramId);
@@ -1847,9 +1848,11 @@ export function generateStandaloneMateriHtml(
           <a href="https://www.youtube.com/watch?v=\${pData.youtubeId || 'fC9zKq38_54'}" target="_blank" rel="noopener noreferrer" class="px-3 py-2 text-xs font-semibold text-rose-700 bg-white hover:bg-rose-50 border border-rose-200 rounded-lg inline-flex items-center gap-1 shrink-0">
             Buka di YouTube ↗
           </a>
-          <a href="./superadmin.html?tab=materi&program=\${currentProgId}&pekan=\${currentPekan}" class="px-3 py-2 text-xs font-semibold text-amber-950 bg-amber-100 hover:bg-amber-200 border border-amber-300 rounded-lg inline-flex items-center gap-1 shrink-0">
-            Edit di Superadmin ⚙
-          </a>
+          \${isSuperAdmin ? \`
+            <a href="./superadmin.html?tab=materi&program=\${currentProgId}&pekan=\${currentPekan}" class="px-3 py-2 text-xs font-semibold text-amber-950 bg-amber-100 hover:bg-amber-200 border border-amber-300 rounded-lg inline-flex items-center gap-1 shrink-0">
+              Edit di Superadmin ⚙
+            </a>
+          \` : ''}
         </div>
 
         <!-- Content Area: ONLY Pekan-specific -->
