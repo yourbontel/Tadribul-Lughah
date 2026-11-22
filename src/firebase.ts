@@ -323,6 +323,13 @@ export function registrationToPrivateFirestoreDoc(rec: RegistrationRecord) {
     ),
     paidTuitionIDR: typeof rec.paidTuitionIDR === 'number' ? Math.max(0, rec.paidTuitionIDR) : undefined,
     installmentPaidCount: typeof rec.installmentPaidCount === 'number' ? Math.max(0, rec.installmentPaidCount) : undefined,
+    monthlyExtraPayments: rec.monthlyExtraPayments && Object.keys(rec.monthlyExtraPayments).length > 0
+      ? Object.fromEntries(
+          Object.entries(rec.monthlyExtraPayments)
+            .filter(([k, v]) => ['1', '2', '3', '4', '5', '6'].includes(k) && typeof v === 'number' && v > 0)
+            .map(([k, v]) => [k, Math.round(v)])
+        )
+      : undefined,
     paymentPlan: rec.paymentPlan || 'cicilan',
     lastPaymentDate: rec.lastPaymentDate ? rec.lastPaymentDate.slice(0, 80) : undefined,
     registeredAt: rec.registeredAt.slice(0, 80),
@@ -387,6 +394,14 @@ export function firestoreDocToRegistration(
         : 510000,
     paidTuitionIDR: typeof data.paidTuitionIDR === 'number' ? data.paidTuitionIDR : undefined,
     installmentPaidCount: typeof data.installmentPaidCount === 'number' ? data.installmentPaidCount : undefined,
+    monthlyExtraPayments:
+      data.monthlyExtraPayments && typeof data.monthlyExtraPayments === 'object' && !Array.isArray(data.monthlyExtraPayments)
+        ? Object.fromEntries(
+            Object.entries(data.monthlyExtraPayments as Record<string, unknown>)
+              .filter(([k, v]) => ['1', '2', '3', '4', '5', '6'].includes(k) && typeof v === 'number' && v > 0)
+              .map(([k, v]) => [k, Math.round(Number(v))])
+          )
+        : undefined,
     paymentPlan: (data.paymentPlan as 'lunas' | 'cicilan') || 'cicilan',
     lastPaymentDate: typeof data.lastPaymentDate === 'string' ? data.lastPaymentDate : undefined,
     registeredAt: String(data.registeredAt || '-'),

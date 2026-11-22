@@ -1191,10 +1191,12 @@ export default function StudentPortalApp() {
     ? currentRegistration.installmentPaidCount
     : Math.min(totalInstallmentMonths, Math.floor(paidTuition / (monthlyInstallment || 85000)));
 
-  const remainingTuition = Math.max(0, totalTuition - paidTuition);
+  const basePaidTuition = Math.min(totalTuition, paidInstallmentsCount * monthlyInstallment);
+  const extraAmount = Math.max(0, paidTuition - paidInstallmentsCount * monthlyInstallment);
   const remainingInstallmentsCount = Math.max(0, totalInstallmentMonths - paidInstallmentsCount);
-  const isTuitionFullyPaid = remainingTuition === 0 || paidInstallmentsCount >= totalInstallmentMonths;
-  const paymentProgressPercent = Math.min(100, Math.round((paidTuition / totalTuition) * 100));
+  const remainingTuition = remainingInstallmentsCount * monthlyInstallment;
+  const isTuitionFullyPaid = paidInstallmentsCount >= totalInstallmentMonths;
+  const paymentProgressPercent = Math.min(100, Math.round((paidInstallmentsCount / totalInstallmentMonths) * 100));
 
   // --- Kalkulasi Pertemuan & Presensi Online Live Zoom ---
   const programMeetings = buildProgramMeetings(enrolledProgram, enrolledSchedule);
@@ -1374,7 +1376,11 @@ export default function StudentPortalApp() {
   };
 
   const getConfirmationWaUrl = (amount: number, installmentIndex?: number) => {
-    const text = `Bismillah Ustadz / Admin Tadribul Lughah, saya santri terdaftar ingin konfirmasi pembayaran cicilan:\n\n- Nama Lengkap: ${currentRegistration.fullName}\n- Nomor Registrasi: ${currentRegistration.registrationNumber}\n- Program: ${enrolledProgram.title}\n- Keterangan: ${installmentIndex ? `Cicilan ke-${installmentIndex} (Bulan ke-${installmentIndex})` : 'Pembayaran Biaya Belajar'}\n- Nominal Transfer: ${formatIDR(amount)}\n- Bank Tujuan: Bank Syariah Indonesia (BSI)\n\nMohon diverifikasi. Syukran wa jazakumullahu khairan.`;
+    const extraLine =
+      extraAmount > 0
+        ? `\n- Uang Tambahan / Infak: ${formatIDR(extraAmount)}`
+        : '';
+    const text = `Bismillah Ustadz / Admin Tadribul Lughah, saya santri terdaftar ingin konfirmasi pembayaran cicilan:\n\n- Nama Lengkap: ${currentRegistration.fullName}\n- Nomor Registrasi: ${currentRegistration.registrationNumber}\n- Program: ${enrolledProgram.title}\n- Keterangan: ${installmentIndex ? `Cicilan ke-${installmentIndex} (Bulan ke-${installmentIndex})` : 'Pembayaran Biaya Belajar'}\n- Nominal Transfer: ${formatIDR(amount)}\n- Total Terbayar Saat Ini: ${formatIDR(paidTuition)} (${paidInstallmentsCount}/${totalInstallmentMonths} Cicilan Lunas)${extraLine}\n- Bank Tujuan: Bank Syariah Indonesia (BSI)\n\nMohon diverifikasi. Syukran wa jazakumullahu khairan.`;
     return `https://wa.me/6281288419023?text=${encodeURIComponent(text)}`;
   };
 
@@ -2402,6 +2408,11 @@ export default function StudentPortalApp() {
                         <p className="text-[11px] text-emerald-300/90 font-medium">
                           {paidInstallmentsCount} dari 6 Cicilan Bulanan
                         </p>
+                        {extraAmount > 0 && (
+                          <p className="text-[10px] text-sky-300 font-semibold">
+                            + Uang Tambahan: {formatIDR(extraAmount)}
+                          </p>
+                        )}
                       </div>
 
                       <div className="bg-white/5 p-3 rounded-lg border border-white/10 space-y-1">
@@ -2420,7 +2431,7 @@ export default function StudentPortalApp() {
                       <div className="flex items-center justify-between text-xs text-slate-300">
                         <span>Progres Pelunasan Biaya Belajar ({paymentProgressPercent}%):</span>
                         <span className="font-mono text-emerald-400 font-bold">
-                          {formatIDR(paidTuition)} / {formatIDR(totalTuition)}
+                          {formatIDR(basePaidTuition)} / {formatIDR(totalTuition)}
                         </span>
                       </div>
                       <div className="w-full h-2 bg-slate-800 rounded-full overflow-hidden border border-slate-700">
@@ -4360,6 +4371,11 @@ export default function StudentPortalApp() {
                       <Check className="w-3 h-3 text-emerald-400" />
                       <span>{paidInstallmentsCount} dari {totalInstallmentMonths} cicilan lunas</span>
                     </div>
+                    {extraAmount > 0 && (
+                      <div className="mt-1.5 inline-block px-2 py-0.5 rounded bg-sky-500/20 border border-sky-400/40 text-[10px] font-semibold text-sky-200">
+                        + Uang Tambahan: {formatIDR(extraAmount)} (tidak memotong bulan berikutnya)
+                      </div>
+                    )}
                   </div>
 
                   <div className={`border rounded-xl p-4 ${
@@ -4388,7 +4404,7 @@ export default function StudentPortalApp() {
                 <div className="mt-6 pt-5 border-t border-white/10">
                   <div className="flex items-center justify-between text-xs text-slate-300 mb-2">
                     <span className="font-medium">Kemajuan Pelunasan Biaya ({paymentProgressPercent}%)</span>
-                    <span className="font-mono text-emerald-300">{formatIDR(paidTuition)} / {formatIDR(totalTuition)}</span>
+                    <span className="font-mono text-emerald-300">{formatIDR(basePaidTuition)} / {formatIDR(totalTuition)}</span>
                   </div>
                   <div className="w-full bg-slate-800 rounded-full h-3 overflow-hidden border border-white/10">
                     <div
@@ -4403,8 +4419,7 @@ export default function StudentPortalApp() {
                   <p className="text-[11px] text-slate-400 mt-2">
                     {isTuitionFullyPaid
                       ? 'Barakallahu fiikum! Seluruh kewajiban biaya pendidikan Anda untuk tingkatan ini telah berstatus Lunas.'
-                      : `Biaya pendidikan di Ma'had Al-Bayan dapat dicicil per bulan santai tanpa bunga dan denda. Sisa cicilan Anda: ${remainingInstallmentsCount} bulan lagi.`
-                    }
+                      : `Biaya pendidikan di Ma'had Al-Bayan dapat dicicil per bulan santai tanpa bunga dan denda. Sisa cicilan Anda: ${remainingInstallmentsCount} bulan lagi.`}
                   </p>
                 </div>
               </div>
@@ -4431,6 +4446,8 @@ export default function StudentPortalApp() {
                     {installmentMonthsList.map((item) => {
                       const isPaid = item.monthIndex <= paidInstallmentsCount;
                       const isNextDue = item.monthIndex === paidInstallmentsCount + 1 && !isTuitionFullyPaid;
+                      const monthExtra = Number(currentRegistration.monthlyExtraPayments?.[String(item.monthIndex)] || 0);
+                      const monthDisplayTotal = isPaid ? monthlyInstallment + monthExtra : monthlyInstallment;
 
                       return (
                         <div
@@ -4457,7 +4474,7 @@ export default function StudentPortalApp() {
                                 {isPaid ? '✓' : item.monthIndex}
                               </div>
                               <div>
-                                <div className="flex items-center gap-2">
+                                <div className="flex flex-wrap items-center gap-2">
                                   <span className="text-xs font-bold text-slate-900">
                                     {item.monthLabel}
                                   </span>
@@ -4474,6 +4491,11 @@ export default function StudentPortalApp() {
                                       Belum Jatuh Tempo
                                     </span>
                                   )}
+                                  {monthExtra > 0 && (
+                                    <span className="px-2 py-0.5 text-[10px] font-semibold rounded-full bg-sky-100 text-sky-900 border border-sky-200">
+                                      + Kelebihan {formatIDR(monthExtra)}
+                                    </span>
+                                  )}
                                 </div>
                                 <p className="text-[11px] text-slate-500 mt-0.5">
                                   {item.note} · <span className="font-medium text-slate-600">Estimasi: {item.dueDate}</span>
@@ -4484,8 +4506,13 @@ export default function StudentPortalApp() {
                             <div className="flex sm:flex-col items-center sm:items-end justify-between sm:justify-center gap-2 pt-2 sm:pt-0 border-t sm:border-t-0 border-slate-200">
                               <div className="text-right">
                                 <span className="text-xs font-mono font-bold text-slate-900">
-                                  {formatIDR(monthlyInstallment)}
+                                  {formatIDR(monthDisplayTotal)}
                                 </span>
+                                {monthExtra > 0 && (
+                                  <span className="block text-[10px] font-medium text-sky-800">
+                                    Pokok {formatIDR(monthlyInstallment)} + {formatIDR(monthExtra)}
+                                  </span>
+                                )}
                               </div>
                               {isPaid ? (
                                 <span className="text-[11px] text-emerald-700 font-medium flex items-center gap-1">

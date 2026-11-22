@@ -879,27 +879,852 @@ export const LEVEL_1_PEKAN_MAP: Record<number, WeeklyPekanData> = {
   },
   11: {
     pekanNumber: 11,
-    moduleIndex: 3,
-    title: 'Pekan 11: Fi\'il Madhi, Mudhari\', dan Amr',
-    arabicTitle: 'أَنْوَاعُ الأَفْعَالِ: المَاضِي وَالمُضَارِعُ وَالأَمْرُ',
-    kitabReference: "Al-Mabadi' An-Nahwiyyah — Jilid 1 (Bab 13–14)",
-    targetOutcome: 'Membedakan tiga dimensi waktu kata kerja dan rumus pembentukannya.',
-    summary: 'Materi pekan ke-11 mengkaji fi\'il madhi (mabni), mudhari\' (mu\'rab), dan amr (mabni).',
-    points: ['Ciri Fi\'il Madhi: Ta Ta\'nits', 'Ciri Fi\'il Mudhari\': Huruf Mudhara\'ah (أنيت)', 'Ciri Fi\'il Amr: Menuntut perbuatan & Ya Mukhatabah'],
-    rules: ['Fi\'il Madhi asalnya mabni fathah, Fi\'il Amr asalnya mabni sukun.'],
-    examples: [{ ar: 'اكْتُبْ دَرْسَكَ يَا زَيْدُ', tr: 'Tulislah pelajaranmu wahai Zaid!' }]
+    moduleIndex: 10,
+    title: 'Pekan 11: Isim Ditinjau dari Pengecilannya (Tashghir)',
+    arabicTitle: 'الِاسْمُ بِاعْتِبَارِ التَّصْغِيرِ',
+    kitabReference: 'Mukhtarot Durusul Lughah — Fasal VII (Isim Tashghir)',
+    youtubeVideoId: 'GTTl-AuQAjE',
+    youtubeTitle: 'Isim Tasghir',
+    youtubeChannel: 'Tadribul Lughah',
+    targetOutcome:
+      'Mampu membentuk Isim Tashghir sesuai jumlah huruf asalnya (3, 4, atau 5 huruf) serta memahami 4 tujuan penggunaannya.',
+    summary:
+      "Video Isim Tasghir membahas Fasal ke-7 kitab Mukhtarot tentang pembagian Isim ditinjau dari pengecilannya (At-Tashghir), yakni mengubah bentuk isim ke pola tertentu untuk tujuan kasih sayang (seperti بُنَيَّ dari اِبْنٌ), menunjukkan ukuran/tingkatan lebih kecil (seperti حُسَيْنٌ dari حَسَنٌ), kedekatan waktu (قُبَيْلَ dari قَبْلُ), atau merendahkan/penghinaan (رُجَيْلٌ dari رَجُلٌ), dengan 3 wazan utama berdasarkan jumlah huruf isim (3, 4, atau 5 huruf).",
+    points: [
+      'Definisi Tashghir (التَّصْغِيرُ): perubahan bentuk isim dalam bahasa Arab untuk menunjukkan pengecilan makna kata benda',
+      'Tujuan ke-1 & ke-2: mengungkapkan kasih sayang (بُنَيَّ = anakku tersayang) dan menunjukkan ukuran/posisi lebih kecil (حَسَنٌ ← حُسَيْنٌ)',
+      'Tujuan ke-3 & ke-4: mendekatkan waktu kejadian (قَبْلُ ← قُبَيْلَ = sesaat sebelum) serta merendahkan/penghinaan (رَجُلٌ ← رُجَيْلٌ)',
+      'Langkah pertama men-tashghir: menghitung jumlah huruf asli isim terlebih dahulu (3 huruf, 4 huruf, atau 5 huruf)',
+      'Tiga wazan utama Tashghir: 3 huruf berpola فُعَيْلٌ, 4 huruf berpola فُعَيْعِلٌ, dan 5 huruf berpola فُعَيْعِيلٌ'
+    ],
+    rules: [
+      'Pengertian Tashghir: Mengubah bentuk isim ke wazan pengecilan untuk makna kasih sayang, ukuran lebih kecil, dekatnya waktu, atau merendahkan.',
+      'Wazan Isim 3 Huruf (فُعَيْلٌ): Huruf pertama didhammahkan, huruf kedua difathahkan, dan disisipkan ya\' sukun setelah huruf kedua (حَسَنٌ ← حُسَيْنٌ).',
+      'Wazan Isim 4 Huruf (فُعَيْعِلٌ): Huruf pertama didhammahkan, huruf kedua difathahkan, disisipkan ya\' sukun, dan huruf ketiga dikasrahkan (مَكْتَبٌ ← مُكَيْتِبٌ).',
+      'Wazan Isim 5 Huruf (فُعَيْعِيلٌ): Seperti pola 4 huruf dengan memanjangkan kasrah pada huruf keempat memakai ya\' sukun (مِصْبَاحٌ ← مُصَيْبِيحٌ).'
+    ],
+    examples: [
+      {
+        ar: 'اِبْنٌ ← بُنَيَّ',
+        tr: 'Anak laki-laki ← Anakku tersayang',
+        breakdown: 'Contoh tashghir untuk tujuan kasih sayang; bentuk asalnya اِبْنٌ lalu dikecilkan menjadi بُنَيَّ.'
+      },
+      {
+        ar: 'حَسَنٌ ← حُسَيْنٌ',
+        tr: 'Hasan ← Husain (bentuk lebih kecil dari Hasan)',
+        breakdown: 'Isim 3 huruf (ح-س-ن) mengikuti wazan فُعَيْلٌ untuk menunjukkan ukuran atau urutan yang lebih kecil.'
+      },
+      {
+        ar: 'قَبْلُ ← قُبَيْلَ',
+        tr: 'Sebelum ← Sesaat sebelum / baru saja sebelum ini',
+        breakdown: 'Contoh tashghir untuk tujuan mendekatkan waktu kejadian agar terasa lebih dekat.'
+      },
+      {
+        ar: 'رَجُلٌ ← رُجَيْلٌ',
+        tr: 'Laki-laki dewasa ← Pria kerdil / kekanak-kanakan',
+        breakdown: 'Isim 3 huruf mengikuti wazan فُعَيْلٌ; dalam konteks ini digunakan untuk tujuan merendahkan atau penghinaan.'
+      },
+      {
+        ar: 'مَكْتَبٌ ← مُكَيْتِبٌ | مَنْزِلٌ ← مُنَيْزِلٌ',
+        tr: 'Meja/kantor ← Meja kecil | Rumah ← Rumah kecil',
+        breakdown: 'Isim terdiri dari 4 huruf (م-ك-ت-ب dan م-ن-ز-ل) ditashghir mengikuti wazan فُعَيْعِلٌ.'
+      },
+      {
+        ar: 'مِصْبَاحٌ ← مُصَيْبِيحٌ | عُصْفُورٌ ← عُصَيْفِيرٌ',
+        tr: 'Lampu ← Lampu kecil | Burung pipit ← Burung pipit kecil',
+        breakdown: 'Isim terdiri dari 5 huruf (م-ص-ب-ا-ح dan ع-ص-ف-و-ر) ditashghir mengikuti wazan فُعَيْعِيلٌ.'
+      }
+    ],
+    vocabularies: [
+      { ar: 'التَّصْغِيرُ', id: 'Pengecilan bentuk isim (Tashghir)', type: 'Isim' },
+      { ar: 'اِبْنٌ', id: 'Anak laki-laki', type: 'Isim' },
+      { ar: 'بُنَيَّ', id: 'Anakku tersayang (tashghir dari اِبْنٌ)', type: 'Isim' },
+      { ar: 'حَسَنٌ', id: 'Baik / nama Hasan', type: 'Isim' },
+      { ar: 'قَبْلُ', id: 'Sebelum', type: 'Isim' },
+      { ar: 'قُبَيْلَ', id: 'Sesaat sebelum / baru saja', type: 'Isim' },
+      { ar: 'رَجُلٌ', id: 'Laki-laki dewasa', type: 'Isim' },
+      { ar: 'مَكْتَبٌ', id: 'Meja / kantor', type: 'Isim' },
+      { ar: 'مَنْزِلٌ', id: 'Rumah / tempat tinggal', type: 'Isim' },
+      { ar: 'مِصْبَاحٌ', id: 'Lampu / pelita', type: 'Isim' }
+    ]
   },
   12: {
     pekanNumber: 12,
-    moduleIndex: 3,
-    title: 'Pekan 12: Pengenalan 4 Keadaan I\'rab',
-    arabicTitle: 'مَبَادِئُ الإِعْرَابِ: الرَّفْعُ، النَّصْبُ، الخَفْضُ، وَالجَزْمُ',
-    kitabReference: "Al-Mabadi' An-Nahwiyyah — Jilid 1 (Bab 15)",
-    targetOutcome: 'Menguasai 4 gerbang utama I\'rab dalam tata bahasa Arab sebagai persiapan naik ke Level 2.',
-    summary: 'Materi pekan ke-12 mengkaji puncak ilmu Nahwu: konsep perubahan harakat akhir (I\'rab).',
-    points: ['Rafa\' (dhommah/pengganti)', 'Nashab (fathah/pengganti)', 'Khafdh/Jar (kasrah/pengganti)', 'Jazm (sukun/pengganti)'],
-    rules: ['Isim menerima rafa, nashab, dan jar (tidak ada jazm). Fiil menerima rafa, nashab, dan jazm (tidak ada jar).'],
-    examples: [{ ar: 'يَجْلِسُ زَيْدٌ فِي المَسْجِدِ', tr: 'Zaid sedang duduk di dalam masjid.' }]
+    moduleIndex: 11,
+    title: 'Pekan 12: Isim Ditinjau dari Nisbahnya (Penisbatan)',
+    arabicTitle: 'الِاسْمُ بِاعْتِبَارِ النِّسْبَةِ',
+    kitabReference: 'Mukhtarot Durusul Lughah — Fasal VIII (Isim Nisbah)',
+    youtubeVideoId: '-i8rpDFJ1qM',
+    youtubeTitle: '_Tadribat Mukhtarat 11_',
+    youtubeChannel: 'Aboezza_Official',
+    targetOutcome:
+      'Mampu membentuk Isim Nisbah dengan menambahkan ya\' bertasydid, memahami 5 tujuannya, serta menerapkan kaidah ta\' marbuthah dan isim 2 huruf.',
+    summary:
+      "Video Tadribat Mukhtarat 11 membahas Fasal ke-8 kitab Mukhtarot karya Ustadz Aunur Rofiq hafizhahullah tentang Isim ditinjau dari penggolongan atau penisbatannya (An-Nisbah). Dijelaskan definisi Nisbah yaitu menambahkan ya' bertasydid di akhir isim dengan huruf sebelumnya berharakat kasrah (untuk mudzakkar ـِيٌّ dan muannats ـِيَّةٌ), lima tujuan utamanya (kebangsaan, asal daerah, agama/idealisme, usaha/ekonomi, serta sifat), serta dua catatan pembentukan pada isim berakhiran ta' marbuthah dan isim dua huruf.",
+    points: [
+      "Definisi Nisbah (النِّسْبَةُ): penambahan huruf ya' bertasydid (يّ) di akhir isim dengan huruf sebelumnya berharakat kasrah",
+      'Bentuk Mudzakkar & Muannats: mudzakkar diakhiri ـِيٌّ (عَرَبِيٌّ، إِسْلَامِيٌّ) sedangkan muannats ditambah ta\' marbuthah menjadi ـِيَّةٌ (عَرَبِيَّةٌ، إِسْلَامِيَّةٌ)',
+      'Lima tujuan Nisbah: menunjukkan kebangsaan, asal daerah/kota/desa, agama/idealisme, bidang usaha/ekonomi, dan sifat sesuatu',
+      "Catatan khusus: isim berakhiran ta' marbuthah dibuang dulu ta'-nya (مَكَّةُ ← مَكِّيٌّ), dan isim 2 huruf ditambah wawu (أَبٌ ← أَبَوِيٌّ)",
+      "Tips kamus: saat mencari akar kata isim nisbah di kamus, lepaskan terlebih dahulu ya' bertasydid dan ta' marbuthah di akhirnya"
+    ],
+    rules: [
+      "Rumus Dasar Nisbah: Tambahkan ya' bertasydid (يّ) di akhir isim dan kasrahkan huruf tepat sebelumnya (سَلَفٌ ← سَلَفِيٌّ / سَلَفِيَّةٌ).",
+      'Lima Makna Nisbah: Digunakan untuk menisbatkan kebangsaan, asal kota/daerah, agama/pemikiran, bidang ekonomi/usaha, serta penyifatan.',
+      "Kaidah Ta' Marbuthah: Apabila isim asalnya diakhiri ta' marbuthah (ة), buanglah ta' marbuthah tersebut sebelum menambah ya' nisbah (زِرَاعَةٌ ← زِرَاعِيٌّ).",
+      "Kaidah Isim Dua Huruf: Apabila isim hanya tersusun dari dua huruf, tambahkan huruf wawu (و) sebelum ya' nisbah (أَبٌ ← أَبَوِيٌّ، يَدٌ ← يَدَوِيٌّ)."
+    ],
+    examples: [
+      {
+        ar: 'سَلَفٌ ← سَلَفِيٌّ / سَلَفِيَّةٌ | عَرَبٌ ← عَرَبِيٌّ / عَرَبِيَّةٌ',
+        tr: 'Salaf ← Pengikut Salaf (lk/pr) | Arab ← Kebangsaan/berbahasa Arab (lk/pr)',
+        breakdown: "Penambahan ya' nisbah bertasydid dengan kasrah sebelumnya untuk mudzakkar, dan penambahan ta' marbuthah untuk muannats."
+      },
+      {
+        ar: 'صِينٌ ← صِينِيٌّ | بَغْدَادُ ← بَغْدَادِيٌّ',
+        tr: 'Negeri Cina ← Warga Cina (kebangsaan) | Baghdad ← Orang Baghdad (asal kota)',
+        breakdown: 'Menunjukkan nisbah kebangsaan (صِينِيٌّ) dan nisbah asal daerah atau kota kelahiran seseorang (بَغْدَادِيٌّ).'
+      },
+      {
+        ar: 'إِسْلَامٌ ← إِسْلَامِيٌّ | يَهُودُ ← يَهُودِيٌّ | نَصْرَانُ ← نَصْرَانِيٌّ',
+        tr: 'Islam ← Beragama/bersifat Islam | Yahudi ← Orang Yahudi | Nasrani ← Orang Nasrani',
+        breakdown: 'Menunjukkan penisbatan kepada agama, keyakinan, atau idealisme tertentu.'
+      },
+      {
+        ar: 'زِرَاعَةٌ ← زِرَاعِيٌّ | تِجَارَةٌ ← تِجَارِيٌّ',
+        tr: 'Pertanian ← Bidang pertanian | Perdagangan ← Bidang perdagangan',
+        breakdown: "Menunjukkan bidang usaha atau sektor ekonomi sekaligus menerapkan kaidah pembuangan ta' marbuthah."
+      },
+      {
+        ar: 'حَدِيدٌ ← حَدِيدِيٌّ | ذَهَبٌ ← ذَهَبِيٌّ',
+        tr: 'Besi ← Memiliki sifat besi | Emas ← Bersifat emas / keemasan',
+        breakdown: 'Menunjukkan suatu sifat yang menyerupai atau mengandung unsur benda asalnya (misalnya ungkapan tinta emas).'
+      },
+      {
+        ar: 'مَكَّةُ ← مَكِّيٌّ | أَبٌ ← أَبَوِيٌّ | يَدٌ ← يَدَوِيٌّ',
+        tr: 'Makkah ← Berasal dari Makkah | Ayah ← Kebapakan | Tangan ← Manual/dengan tangan',
+        breakdown: "مَكَّةُ dibuang ta' marbuthahnya, sedangkan أَبٌ dan يَدٌ yang hanya 2 huruf ditambah wawu (و) sebelum ya' nisbah."
+      }
+    ],
+    vocabularies: [
+      { ar: 'النِّسْبَةُ', id: 'Penisbatan / penggolongan', type: 'Isim' },
+      { ar: 'عَرَبٌ', id: 'Arab', type: 'Isim' },
+      { ar: 'صِينٌ', id: 'Negeri Cina / Tiongkok', type: 'Isim' },
+      { ar: 'مَكَّةُ', id: 'Kota Makkah', type: 'Isim' },
+      { ar: 'زِرَاعَةٌ', id: 'Pertanian', type: 'Isim' },
+      { ar: 'تِجَارَةٌ', id: 'Perdagangan / perniagaan', type: 'Isim' },
+      { ar: 'حَدِيدٌ', id: 'Besi', type: 'Isim' },
+      { ar: 'ذَهَبٌ', id: 'Emas', type: 'Isim' },
+      { ar: 'أَبٌ', id: 'Ayah / bapak', type: 'Isim' },
+      { ar: 'يَدٌ', id: 'Tangan', type: 'Isim' }
+    ]
+  },
+  13: {
+    pekanNumber: 13,
+    moduleIndex: 12,
+    title: 'Pekan 13: Fi\'il Ditinjau dari Bangunan Hurufnya (Shahih & Mu\'tal)',
+    arabicTitle: 'الْفِعْلُ بِاعْتِبَارِ الصِّحَّةِ وَالِاعْتِلَالِ',
+    kitabReference: "Mulakhkhash Qawa'id al-Lughah al-'Arabiyyah (hal. 277–278) & Mukhtarot",
+    youtubeVideoId: 'wa6vPXoRiaw',
+    youtubeTitle: '_Tadribat Mukhtarat 12_',
+    youtubeChannel: 'Aboezza_Official',
+    targetOutcome:
+      "Mampu membedakan Fi'il Shahih (Mahmuz, Mudha'af, Salim) dan Fi'il Mu'tal (Mitsal, Ajwaf, Naqish, serta Lafif) berdasarkan huruf aslinya.",
+    summary:
+      "Video Tadribat Mukhtarat 12 mengawali pembahasan bab Fi'il langsung dari kitab gundul Mulakhkhash Qawa'id al-Lughah al-'Arabiyyah (hal. 277–278) yang menjadi rujukan utama kitab Mukhtarot. Dibahas pembagian fi'il ditinjau dari bangunan huruf aslinya menjadi Fi'il Shahih (bebas dari huruf 'illah ا-و-ي: Mahmuz, Mudha'af Tsulatsi, dan Salim) serta Fi'il Mu'tal (mengandung huruf 'illah pada huruf aslinya: Mitsal, Ajwaf, Naqish), ditambah penjelasan Fi'il Lafif (Mafruq dan Maqrun) dari kitab Mukhtarot.",
+    points: [
+      "Pembagian Fi'il ditinjau dari bangunannya (بِنْيَتُهُ): terbagi menjadi Fi'il Shahih dan Fi'il Mu'tal dengan memeriksa fa', 'ain, dan lam fi'ilnya",
+      "Fi'il Shahih (الصَّحِيحُ): fi'il yang seluruh huruf aslinya bukan huruf 'illah (ا، و، ي), terbagi menjadi Mahmuz, Mudha'af Tsulatsi, dan Salim",
+      "Rincian Fi'il Shahih: Mahmuz berhuruf asli hamzah (أَخَذَ، سَأَلَ، قَرَأَ), Mudha'af 'ain & lam fi'ilnya sejenis (شَدَّ، رَدَّ), Salim bebas dari keduanya (كَتَبَ، فَتَحَ)",
+      "Fi'il Mu'tal (المُعْتَلُّ): fi'il yang mengandung huruf 'illah pada huruf aslinya, terbagi menjadi Mitsal (awal), Ajwaf (tengah), dan Naqish (akhir)",
+      'Tambahan dari kitab Mukhtarot: Fi\'il Lafif memiliki 2 huruf \'illah, terbagi menjadi Lafif Mafruq (وَقَى) dan Lafif Maqrun (رَوَى)'
+    ],
+    rules: [
+      "Kriteria Fi'il Shahih: Seluruh huruf asli (fa', 'ain, dan lam fi'il) tidak mengandung huruf 'illah (Alif, Wawu, atau Ya').",
+      "Tiga Jenis Fi'il Shahih: Mahmuz (ada hamzah asli), Mudha'af Tsulatsi ('ain dan lam fi'il sama/bertasydid), dan Salim (selamat dari hamzah dan tadh'if).",
+      "Tiga Jenis Fi'il Mu'tal (Mulakhkhash): Mitsal (huruf 'illah di fa' fi'il), Ajwaf (huruf 'illah di 'ain fi'il), dan Naqish (huruf 'illah di lam fi'il).",
+      "Fi'il Lafif (Mukhtarot): Fi'il mu'tal dengan dua huruf 'illah; Lafif Mafruq jika terpisah di fa' dan lam fi'il (وَقَى), Lafif Maqrun jika berdampingan di 'ain dan lam fi'il (رَوَى)."
+    ],
+    examples: [
+      {
+        ar: 'أَخَذَ — سَأَلَ — قَرَأَ',
+        tr: 'Mengambil — Bertanya — Membaca',
+        breakdown: "Contoh Fi'il Shahih Mahmuz karena salah satu huruf aslinya berupa hamzah (di awal, tengah, atau akhir)."
+      },
+      {
+        ar: 'شَدَّ — رَدَّ — هَبَّ — مَدَّ',
+        tr: 'Mengencangkan — Mengembalikan — Bertiup — Memanjangkan',
+        breakdown: "Contoh Fi'il Shahih Mudha'af Tsulatsi karena huruf kedua ('ain fi'il) dan ketiga (lam fi'il) berasal dari huruf sejenis."
+      },
+      {
+        ar: 'كَتَبَ — فَتَحَ — فَهِمَ — يَدْرُسُ — اُرْسُمْ',
+        tr: 'Menulis — Membuka — Memahami — Sedang belajar — Gambarlah',
+        breakdown: "Contoh Fi'il Shahih Salim karena seluruh huruf aslinya (misal د-ر-س dan ر-س-م) bebas dari huruf 'illah, hamzah, maupun penggandaan."
+      },
+      {
+        ar: 'وَجَدَ — وَثَبَ — يَئِسَ',
+        tr: 'Mendapati — Melompat — Berputus asa',
+        breakdown: "Contoh Fi'il Mu'tal Mitsal karena huruf asli pertamanya (fa' fi'il) berupa huruf 'illah wawu atau ya'."
+      },
+      {
+        ar: 'قَالَ — صَامَ — طَابَ',
+        tr: 'Berkata — Berpuasa — Menjadi baik/harum',
+        breakdown: "Contoh Fi'il Mu'tal Ajwaf karena huruf asli keduanya ('ain fi'il) merupakan huruf 'illah."
+      },
+      {
+        ar: 'دَنَا — رَمَى — لَقِيَ | وَقَى (مَفْرُوقٌ) — رَوَى (مَقْرُونٌ)',
+        tr: 'Mendekat — Melempar — Bertemu | Menjaga (Mafruq) — Meriwayatkan (Maqrun)',
+        breakdown: 'دَنَا، رَمَى، لَقِيَ adalah Fi\'il Mu\'tal Naqish (huruf \'illah di akhir), sedangkan وَقَى dan رَوَى adalah contoh Fi\'il Lafif berhuruf \'illah ganda.'
+      }
+    ],
+    vocabularies: [
+      { ar: 'بِنْيَةٌ', id: 'Bangunan / struktur huruf kata', type: 'Isim' },
+      { ar: 'حُرُوفُ الْعِلَّةِ', id: "Huruf-huruf 'illah (ا، و، ي)", type: 'Isim' },
+      { ar: 'أَخَذَ', id: "Telah mengambil (Shahih Mahmuz)", type: "Fi'il" },
+      { ar: 'سَأَلَ', id: 'Telah bertanya (Shahih Mahmuz)', type: "Fi'il" },
+      { ar: 'شَدَّ', id: "Telah mengencangkan (Shahih Mudha'af)", type: "Fi'il" },
+      { ar: 'فَتَحَ', id: 'Telah membuka (Shahih Salim)', type: "Fi'il" },
+      { ar: 'صَامَ', id: "Telah berpuasa (Mu'tal Ajwaf)", type: "Fi'il" },
+      { ar: 'رَمَى', id: "Telah melempar (Mu'tal Naqish)", type: "Fi'il" },
+      { ar: 'وَقَى', id: 'Telah menjaga (Lafif Mafruq)', type: "Fi'il" },
+      { ar: 'رَوَى', id: 'Telah meriwayatkan (Lafif Maqrun)', type: "Fi'il" }
+    ]
+  },
+  14: {
+    pekanNumber: 14,
+    moduleIndex: 13,
+    title: 'Pekan 14: Fi\'il Ditinjau dari Penyusunannya (Mujarrad & Mazid)',
+    arabicTitle: 'الْفِعْلُ بِاعْتِبَارِ التَّجَرُّدِ وَالزِّيَادَةِ',
+    kitabReference: 'Mukhtarot Durusul Lughah — Fasal II (hal. 41–42) & Tadribat',
+    youtubeVideoId: 'a9beUUrEHUE',
+    youtubeTitle: 'Materi 13 Fi il ditinjau dr penyusunannya',
+    youtubeChannel: 'Tadribul Lughah',
+    targetOutcome:
+      'Mampu membedakan Fi\'il Mujarrad (Tsulatsi & Ruba\'i) dan Fi\'il Mazid (+1, +2, atau +3 huruf) guna menemukan akar kata di kamus Arab.',
+    summary:
+      "Video Materi 13 membahas Fasal ke-2 kitab Mukhtarot Durusul Lughah (hal. 41–42) mengenai pembagian Fi'il ditinjau dari penyusunannya (At-Tarkib / At-Tajarrud waz-Ziyadah). Dijelaskan perbedaan antara Fi'il Mujarrad yang seluruh hurufnya asli (Tsulatsi 3 wazan: فَعَلَ، فَعِلَ، فَعُلَ dan Ruba'i 1 wazan: فَعْلَلَ) dengan Fi'il Mazid yang mendapat tambahan 1, 2, atau 3 huruf, serta pentingnya mengidentifikasi huruf asli (fa'-'ain-lam fi'il) untuk mencari makna kata di kamus.",
+    points: [
+      "Pembagian Fi'il ditinjau dari penyusunannya: terbagi menjadi Fi'il Mujarrad (murni huruf asli) dan Fi'il Mazid (mendapat huruf tambahan)",
+      "Fi'il Tsulatsi Mujarrad (3 huruf asli): hanya memiliki 3 wazan madhi yaitu فَعَلَ، فَعِلَ، dan فَعُلَ (perbedaan pada harakat 'ain fi'il)",
+      "Fi'il Ruba'i Mujarrad (4 huruf asli): hanya memiliki 1 wazan yaitu فَعْلَلَ seperti طَمْأَنَ، بَسْمَلَ، dan دَحْرَجَ",
+      "Fi'il Tsulatsi Mazid: tambahan 1 huruf (3 wazan: أَفْعَلَ، فَاعَلَ، فَعَّلَ), tambahan 2 huruf (5 wazan), dan tambahan 3 huruf (4 wazan seperti اِسْتَفْعَلَ)",
+      "Fi'il Ruba'i Mazid & tips kamus: Ruba'i mendapat tambahan 1 (تَفَعْلَلَ) atau 2 huruf (اِفْعَلَلَّ، اِفْعَنْلَلَ); lepaskan huruf tambahan untuk mencari akar kata di kamus"
+    ],
+    rules: [
+      "Fi'il Mujarrad: Kata kerja yang seluruh huruf penyusunnya adalah huruf asli tanpa tambahan, baik 3 huruf (Tsulatsi) maupun 4 huruf (Ruba'i).",
+      "Wazan Tsulatsi & Ruba'i Mujarrad: Tsulatsi berwazan فَعَلَ، فَعِلَ، فَعُلَ sedangkan Ruba'i berwazan فَعْلَلَ.",
+      "Fi'il Tsulatsi Mazid: Fi'il 3 huruf asli yang mendapat tambahan 1 huruf (أَفْعَلَ، فَاعَلَ، فَعَّلَ), 2 huruf (اِنْفَعَلَ، اِفْتَعَلَ، تَفَعَّلَ، تَفَاعَلَ، اِفْعَلَّ), atau 3 huruf (اِسْتَفْعَلَ).",
+      "Fi'il Ruba'i Mazid: Fi'il 4 huruf asli yang mendapat tambahan 1 huruf berwazan تَفَعْلَلَ atau tambahan 2 huruf berwazan اِفْعَلَلَّ dan اِفْعَنْلَلَ."
+    ],
+    examples: [
+      {
+        ar: 'نَصَرَ (فَعَلَ) — فَرِحَ (فَعِلَ) — حَسُنَ (فَعُلَ)',
+        tr: 'Telah menolong — Telah gembira — Telah baik/bagus',
+        breakdown: "Tiga contoh utama Fi'il Tsulatsi Mujarrad yang menunjukkan tiga variasi harakat 'ain fi'il pada bentuk madhi."
+      },
+      {
+        ar: 'طَمْأَنَ — بَسْمَلَ — دَحْرَجَ (فَعْلَلَ)',
+        tr: 'Menenangkan — Membaca basmalah — Menggelindingkan',
+        breakdown: "Contoh Fi'il Ruba'i Mujarrad yang seluruh keempat hurufnya merupakan huruf asli mengikuti wazan فَعْلَلَ."
+      },
+      {
+        ar: 'أَحْسَنَ (أَفْعَلَ) — فَرَّحَ (فَعَّلَ) — وَاعَدَ (فَاعَلَ)',
+        tr: 'Berbuat baik — Menggembirakan — Saling berjanji',
+        breakdown: 'Contoh Fi\'il Tsulatsi Mazid tambahan 1 huruf (hamzah di awal, tasydid pada \'ain fi\'il, atau alif setelah fa\' fi\'il).'
+      },
+      {
+        ar: 'اِنْطَلَقَ — اِجْتَمَعَ — تَعَلَّمَ — تَبَاعَدَ — اِحْمَرَّ',
+        tr: 'Berangkat — Berkumpul — Belajar — Saling menjauh — Memerah',
+        breakdown: 'Lima contoh Fi\'il Tsulatsi Mazid tambahan 2 huruf (wazan اِنْفَعَلَ، اِفْتَعَلَ، تَفَعَّلَ، تَفَاعَلَ، dan اِفْعَلَّ).'
+      },
+      {
+        ar: 'اِسْتَنْصَرَ — اِسْتَغْفَرَ — اِسْتَخْرَجَ (اِسْتَفْعَلَ)',
+        tr: 'Meminta pertolongan — Memohon ampun — Mengeluarkan',
+        breakdown: 'Contoh Fi\'il Tsulatsi Mazid tambahan 3 huruf (ا، س، ت di awal) dari wazan paling masyhur اِسْتَفْعَلَ.'
+      },
+      {
+        ar: 'تَدَحْرَجَ (تَفَعْلَلَ) — اِطْمَأَنَّ / اِقْشَعَرَّ (اِفْعَلَلَّ)',
+        tr: 'Bergelinding — Merasa tenang / merinding',
+        breakdown: 'Contoh Fi\'il Ruba\'i Mazid tambahan 1 huruf (ت) dari دَحْرَجَ dan tambahan 2 huruf dari طَمْأَنَ.'
+      }
+    ],
+    vocabularies: [
+      { ar: 'المُجَرَّدُ', id: 'Fi\'il yang murni tanpa huruf tambahan', type: 'Isim' },
+      { ar: 'المَزِيدُ', id: 'Fi\'il yang mendapat huruf tambahan', type: 'Isim' },
+      { ar: 'ثُلَاثِيٌّ', id: 'Tersusun dari tiga huruf asli', type: 'Isim' },
+      { ar: 'رُبَاعِيٌّ', id: 'Tersusun dari empat huruf asli', type: 'Isim' },
+      { ar: 'نَصَرَ', id: 'Telah menolong', type: "Fi'il" },
+      { ar: 'فَرِحَ', id: 'Telah gembira', type: "Fi'il" },
+      { ar: 'حَسُنَ', id: 'Telah baik / bagus', type: "Fi'il" },
+      { ar: 'دَحْرَجَ', id: 'Telah menggelindingkan (Ruba\'i Mujarrad)', type: "Fi'il" },
+      { ar: 'اِجْتَمَعَ', id: 'Telah berkumpul (Tsulatsi Mazid +2)', type: "Fi'il" },
+      { ar: 'اِسْتَغْفَرَ', id: 'Telah memohon ampun (Tsulatsi Mazid +3)', type: "Fi'il" }
+    ]
+  },
+  15: {
+    pekanNumber: 15,
+    moduleIndex: 14,
+    title: "Pekan 15: Fi'il Ditinjau dari Waktu Kejadiannya (Madhi, Mudhari', Amr)",
+    arabicTitle: 'الْفِعْلُ بِاعْتِبَارِ زَمَنِ وُقُوعِهِ',
+    kitabReference: 'Mukhtarot Durusul Lughah — Fasal III & Tadribat Fasal 3.a',
+    youtubeVideoId: 'tNAOL83ZOz4',
+    youtubeTitle: 'Materi 14 Fi il ditinjau dr waktu kejadiannya',
+    youtubeChannel: 'Tadribul Lughah',
+    targetOutcome:
+      "Mampu membedakan Fi'il Madhi, Mudhari', dan Amr berdasarkan waktu kejadiannya serta membentuk Fi'il Amr dari Fi'il Mudhari'.",
+    summary:
+      "Video Materi 14 membahas Fasal ke-3 kitab Mukhtarot tentang pembagian Fi'il ditinjau dari waktu kejadiannya menjadi tiga jenis: Fi'il Madhi (telah terjadi di waktu lampau), Fi'il Mudhari' (sedang atau akan terjadi, diawali huruf mudhara'ah أَنَيْتَ), dan Fi'il Amr (kata kerja perintah setelah waktu bicara). Disampaikan pula cara praktis membentuk Fi'il Amr dari Fi'il Mudhari' beserta kaidah harakat Hamzah Washal melalui latihan Tadribat Fasal 3.a.",
+    points: [
+      "Fi'il Madhi (الْمَاضِي): menunjukkan peristiwa di waktu lampau sebelum pembicaraan dengan kata kunci makna 'telah...'",
+      "Fi'il Mudhari' (الْمُضَارِعُ): menunjukkan peristiwa saat berbicara atau sesudahnya ('sedang/akan...') dan diawali huruf mudhara'ah أَنَيْتَ (أ، ن، ي، ت)",
+      "Fi'il Amr (الأَمْرُ): kata kerja yang menuntut pelaksanaan suatu perintah setelah waktu pembicaraan",
+      "Rumus membentuk Fi'il Amr: ambil Fi'il Mudhari', buang huruf mudhara'ah, sukunkan huruf akhir, lalu beri Hamzah Washal jika huruf awalnya sukun",
+      "Kaidah harakat Hamzah Washal pada Fi'il Amr: berharakat dhammah jika 'ain fi'il mudhari' dhammah (اُكْتُبْ), dan kasrah jika kasrah/fathah (اِغْسِلْ، اِسْمَعْ)"
+    ],
+    rules: [
+      "Tiga Waktu Fi'il: Madhi untuk masa lampau (telah), Mudhari' untuk masa kini/mendatang (sedang/akan), dan Amr untuk tuntutan perintah.",
+      "Ciri Huruf Mudhara'ah: Setiap Fi'il Mudhari' pasti diawali salah satu dari empat huruf أ، ن، ي، ت (أَنَيْتَ).",
+      "Langkah Membentuk Fi'il Amr: Buang huruf mudhara'ah pada fi'il mudhari', sukunkan huruf akhir, dan tambahkan Hamzah Washal bila huruf pertamanya mati.",
+      "Harakat Hamzah Washal: Dhammah bila 'ain fi'il mudhari' dhammah (يَكْتُبُ ← اُكْتُبْ), atau kasrah bila 'ain fi'il mudhari' kasrah atau fathah (يَغْسِلُ ← اِغْسِلْ، يَسْمَعُ ← اِسْمَعْ)."
+    ],
+    examples: [
+      {
+        ar: 'هَلْ أَتَاكَ حَدِيثُ الْغَاشِيَةِ | ذَهَبَ مُحَمَّدٌ إِلَى الْمَدْرَسَةِ قَبْلَ السَّاعَةِ',
+        tr: 'Apakah telah datang kepadamu berita Al-Ghasyiyah? | Muhammad telah pergi ke sekolah satu jam lalu.',
+        breakdown: "أَتَى dan ذَهَبَ adalah Fi'il Madhi karena menunjukkan peristiwa yang telah terjadi sebelum waktu berbicara."
+      },
+      {
+        ar: 'الْآنَ تُغَادِرُ الطَّائِرَةُ الْمَطَارَ | فَيُعَذِّبُهُ اللَّهُ الْعَذَابَ الْأَكْبَرَ',
+        tr: 'Sekarang pesawat itu sedang meninggalkan bandara | Maka Allah akan mengazabnya dengan azab yang besar.',
+        breakdown: "تُغَادِرُ (sedang) dan يُعَذِّبُ (akan) adalah Fi'il Mudhari' yang diawali huruf mudhara'ah ت dan ي."
+      },
+      {
+        ar: 'اِحْتَرِمْ وَالِدَيْكَ | فَذَكِّرْ إِنَّمَا أَنْتَ مُذَكِّرٌ',
+        tr: 'Hormatilah kedua orang tuamu | Maka berilah peringatan, sesungguhnya engkau hanyalah pemberi peringatan.',
+        breakdown: "اِحْتَرِمْ dan ذَكِّرْ adalah Fi'il Amr yang menuntut dilakukannya perbuatan setelah waktu bicara."
+      },
+      {
+        ar: 'سَمِعَ — يَسْمَعُ — اِسْمَعْ',
+        tr: 'Telah mendengar — Sedang mendengar — Dengarkanlah!',
+        breakdown: "Latihan Tadribat No. 1: 'ain fi'il mudhari' berharakat fathah (يَسْمَعُ), sehingga Hamzah Washal pada Fi'il Amr dikasrahkan (اِسْمَعْ)."
+      },
+      {
+        ar: 'كَتَبَ — يَكْتُبُ — اُكْتُبْ',
+        tr: 'Telah menulis — Sedang menulis — Tulislah!',
+        breakdown: "Latihan Tadribat No. 2: 'ain fi'il mudhari' berharakat dhammah (يَكْتُبُ), sehingga Hamzah Washal pada Fi'il Amr didhammahkan (اُكْتُبْ)."
+      },
+      {
+        ar: 'غَسَلَ — يَغْسِلُ — اِغْسِلْ | رَجَعَ — يَرْجِعُ — اِرْجِعْ',
+        tr: 'Mencuci — Sedang mencuci — Cucilah! | Kembali — Sedang kembali — Kembalilah!',
+        breakdown: "Latihan Tadribat No. 3–4: 'ain fi'il mudhari' berharakat kasrah (يَغْسِلُ، يَرْجِعُ), sehingga Hamzah Washal berharakat kasrah."
+      }
+    ],
+    vocabularies: [
+      { ar: 'الزَّمَانُ', id: 'Waktu / zaman', type: 'Isim' },
+      { ar: 'الْمَاضِي', id: 'Yang telah lampau', type: 'Isim' },
+      { ar: 'الْمُضَارِعُ', id: 'Yang sedang / akan terjadi', type: 'Isim' },
+      { ar: 'الْأَمْرُ', id: 'Perintah', type: 'Isim' },
+      { ar: 'الطَّائِرَةُ', id: 'Pesawat terbang', type: 'Isim' },
+      { ar: 'الْمَطَارُ', id: 'Bandara', type: 'Isim' },
+      { ar: 'سَمِعَ', id: 'Telah mendengar', type: "Fi'il" },
+      { ar: 'غَسَلَ', id: 'Telah mencuci', type: "Fi'il" },
+      { ar: 'رَجَعَ', id: 'Telah kembali / pulang', type: "Fi'il" },
+      { ar: 'اِحْتَرِمْ', id: 'Hormatilah!', type: "Fi'il" }
+    ]
+  },
+  16: {
+    pekanNumber: 16,
+    moduleIndex: 15,
+    title: "Pekan 16: Tashrif Lughawi Fi'il Madhi (14 Dhamir)",
+    arabicTitle: 'التَّصْرِيفُ اللُّغَوِيُّ لِلْفِعْلِ الْمَاضِي',
+    kitabReference: 'Auzan Mukhtarah (hal. 40) & Tadribat Fasal 3.c (hal. 67)',
+    youtubeVideoId: 'iaD3BKFG4LI',
+    youtubeTitle: 'Materi 14a Tashrif fiil madhi',
+    youtubeChannel: 'Tadribul Lughah',
+    targetOutcome:
+      "Menguasai perubahan bentuk Fi'il Madhi pada 14 dhamir beserta penyesuaiannya terhadap subjek isim zhahir dalam kalimat.",
+    summary:
+      "Video Materi 14a mengkaji secara rinci Tashrif Lughawi Fi'il Madhi dari kitab Auzan Mukhtarah (hal. 40) dan latihan Tadribat Fasal 3.c (hal. 67). Dijelaskan bahwa tashrif lughawi adalah perubahan bentuk fi'il secara vertikal dari atas ke bawah mengikuti 14 kata ganti (dhamir) pelaku, di mana semua wazan Tsulatsi (فَعَلَ، فَعِلَ، فَعُلَ) memiliki akhiran sufiks yang seragam dan wajib menyesuaikan jenis serta jumlah subjeknya dalam kalimat.",
+    points: [
+      'Definisi Tashrif Lughawi: perubahan bentuk kata kerja secara vertikal berdasarkan 14 kata ganti (dhamir) pelaku/subjek',
+      'Perubahan Fi\'il Madhi terjadi di bagian akhir kata dengan akhiran tetap untuk ghaib (ـَ، ـَا، ـُوا، ـَتْ، ـَتَا، ـْنَ)',
+      'Akhiran mukhathab & mutakallim: ـْتَ، ـْتُمَا، ـْتُمْ، ـْتِ، ـْتُمَا، ـْتُنَّ، serta ـْتُ (أَنَا) dan ـْنَا (نَحْنُ)',
+      "Keseragaman wazan Tsulatsi: ketiga pola فَعَلَ (كَتَبَ)، فَعِلَ (فَهِمَ)، dan فَعُلَ (ثَقُلَ) memakai sufiks dhamir yang persis sama",
+      'Kaidah penyesuaian subjek (Tadribat Fasal 3.c): fi\'il setelah subjek isim zhahir wajib cocok dengan jenis dan jumlah subjeknya'
+    ],
+    rules: [
+      "Pola 14 Dhamir Fi'il Madhi: Ghaib (فَعَلَ، فَعَلَا، فَعَلُوا | فَعَلَتْ، فَعَلَتَا، فَعَلْنَ), Mukhathab (فَعَلْتَ، فَعَلْتُمَا، فَعَلْتُمْ | فَعَلْتِ، فَعَلْتُمَا، فَعَلْتُنَّ), Mutakallim (فَعَلْتُ، فَعَلْنَا).",
+      'Konsistensi Akhiran Antar-Wazan: Perbedaan wazan فَعَلَ، فَعِلَ، dan فَعُلَ hanya pada harakat \'ain fi\'il, sedangkan akhiran dhamirnya identik.',
+      'Kesesuaian Subjek (Mubtada\' + Fi\'il): Subjek di awal kalimat menentukan bentuk akhiran fi\'il setelahnya (tunggal, mutsanna ـَا, jamak lk ـُوا, atau jamak pr ـْنَ).'
+    ],
+    examples: [
+      {
+        ar: 'كَتَبَ — كَتَبَا — كَتَبُوا | كَتَبَتْ — كَتَبَتَا — كَتَبْنَ',
+        tr: 'Dia (lk) / mereka berdua (lk) / mereka (lk) | dia (pr) / mereka berdua (pr) / mereka (pr) telah menulis',
+        breakdown: "Enam bentuk dhamir orang ketiga (Ghaib & Ghaibah) pada Fi'il Madhi wazan فَعَلَ."
+      },
+      {
+        ar: 'كَتَبْتَ — كَتَبْتُمَا — كَتَبْتُمْ | كَتَبْتِ — كَتَبْتُمَا — كَتَبْتُنَّ',
+        tr: 'Kamu (lk) / kalian berdua / kalian (lk) | kamu (pr) / kalian berdua / kalian (pr) telah menulis',
+        breakdown: "Enam bentuk dhamir orang kedua (Mukhathab & Mukhathabah) pada Fi'il Madhi."
+      },
+      {
+        ar: 'كَتَبْتُ — كَتَبْنَا | فَهِمْتُ — فَهِمْنَا | ثَقُلَ — ثَقُلَتْ',
+        tr: 'Saya/kami telah menulis | Saya/kami telah memahami | Ia telah berat',
+        breakdown: "Dhamir Mutakallim (أَنَا/نَحْنُ) serta perbandingan tiga wazan Tsulatsi (فَعَلَ، فَعِلَ، فَعُلَ) dengan akhiran dhamir yang seragam."
+      },
+      {
+        ar: 'الْأَوْلَادُ شَرِبُوا | الطَّالِبَاتُ قَرَأْنَ',
+        tr: 'Anak-anak itu telah minum | Para siswi itu telah membaca',
+        breakdown: 'Tadribat Fasal 3.c No. 1 & 4: subjek jamak mudzakkar (الْأَوْلَادُ) memakai ـُوا, sedangkan jamak muannats (الطَّالِبَاتُ) memakai ـْنَ.'
+      },
+      {
+        ar: 'آمِنَةُ خَرَجَتْ | أَنَا سَمِعْتُ',
+        tr: 'Aminah telah keluar | Saya telah mendengar',
+        breakdown: 'Tadribat Fasal 3.c No. 2 & 3: subjek perempuan tunggal (آمِنَةُ) memakai تْ ta\'nits, dan dhamir أَنَا memakai تُ.'
+      },
+      {
+        ar: 'مُحَمَّدٌ كَتَبَ | مُحَمَّدٌ وَأَحْمَدُ كَتَبَا | الطُّلَّابُ كَتَبُوا',
+        tr: 'Muhammad telah menulis | Muhammad dan Ahmad berdua telah menulis | Para siswa telah menulis',
+        breakdown: 'Contoh aplikasi penyesuaian fi\'il madhi terhadap subjek mufrad, mutsanna (ـَا), dan jamak mudzakkar (ـُوا).'
+      }
+    ],
+    vocabularies: [
+      { ar: 'الضَّمِيرُ', id: 'Kata ganti (dhamir)', type: 'Isim' },
+      { ar: 'كَتَبَ', id: 'Telah menulis', type: "Fi'il" },
+      { ar: 'فَهِمَ', id: 'Telah memahami', type: "Fi'il" },
+      { ar: 'ثَقُلَ', id: 'Telah menjadi berat', type: "Fi'il" },
+      { ar: 'شَرِبَ', id: 'Telah minum', type: "Fi'il" },
+      { ar: 'خَرَجَ', id: 'Telah keluar', type: "Fi'il" },
+      { ar: 'قَرَأَ', id: 'Telah membaca', type: "Fi'il" },
+      { ar: 'الْأَوْلَادُ', id: 'Anak-anak (jamak dari وَلَدٌ)', type: 'Isim' },
+      { ar: 'الطَّالِبَاتُ', id: 'Para siswi / mahasiswi', type: 'Isim' },
+      { ar: 'نَحْنُ', id: 'Kami / kita', type: 'Isim' }
+    ]
+  },
+  17: {
+    pekanNumber: 17,
+    moduleIndex: 16,
+    title: "Pekan 17: Tashrif Lughawi Fi'il Mudhari' (14 Dhamir)",
+    arabicTitle: 'التَّصْرِيفُ اللُّغَوِيُّ لِلْفِعْلِ الْمُضَارِعِ',
+    kitabReference: "Tabel Rumus Tashrif Lughawi Fi'il Mudhari' & Tadribat Fasal 3.d (hal. 70)",
+    youtubeVideoId: 'pikLLWAflT0',
+    youtubeTitle: 'Materi 14b Tashrif Fiil Mudhari',
+    youtubeChannel: 'Tadribul Lughah',
+    targetOutcome:
+      "Menguasai pola awalan huruf mudhara'ah (أَنَيْتُ) dan akhiran 14 dhamir pada Tashrif Lughawi Fi'il Mudhari' di semua bab wazan.",
+    summary:
+      "Video Materi 14b mengulas Tashrif Lughawi Fi'il Mudhari' (bermakna sedang/akan berbuat) menggunakan Tabel 6.4 dan 6.5 serta latihan Tadribat Fasal 3.d (hal. 70). Berbeda dengan fi'il madhi yang hanya berubah di akhir, Fi'il Mudhari' mengalami perubahan di awal (huruf mudhara'ah أ، ن، ي، ت) sekaligus di akhir kata (ـَانِ، ـُونَ، ـِينَ، ـْنَ) sesuai 14 dhamir, dengan pola awalan-akhiran yang identik di seluruh bab wazan Mujarrad maupun Mazid.",
+    points: [
+      "Perbedaan dengan Fi'il Madhi: Fi'il Mudhari' mengalami perubahan di awal kata (huruf mudhara'ah أَنَيْتُ) sekaligus di akhir kata",
+      "Rumus dhamir ghaib & mukhathab: tunggal memakai يَـ/تَـ tanpa akhiran tambahan, mutsanna ditambah ـَانِ, jamak lk ـُونَ, dan jamak pr ـْنَ",
+      'Bentuk khusus أَنْتِ, أَنَا, dan نَحْنُ: أَنْتِ berpola تَفْعَلِينَ, أَنَا berpola أَفْعَلُ (awalan أَ), dan نَحْنُ berpola نَفْعَلُ (awalan نَـ)',
+      "Variasi harakat 'ain fi'il antar-bab (يَفْعُلُ، يَفْعِلُ، يَفْعَلُ) dan fi'il mazid (يَسْتَفْعِلُ) tetap memakai rumus awalan-akhiran yang identik",
+      "Aplikasi Tadribat Fasal 3.d (hal. 70): mencocokkan fi'il mudhari' dengan subjek isim zhahir seperti الْأَطِبَّاءُ يَقُولُونَ dan الْفَلَّاحُونَ يَحْلِقُونَ"
+    ],
+    rules: [
+      "Huruf Mudhara'ah (أَنَيْتُ): يَـ untuk هُوَ/هُمَا/هُمْ/هُنَّ; تَـ untuk هِيَ/هُمَا(pr)/أَنْتَ/أَنْتُمَا/أَنْتُمْ/أَنْتِ/أَنْتُنَّ; أَ untuk أَنَا; dan نَـ untuk نَحْنُ.",
+      "Pola Akhiran 14 Dhamir: Mutsanna ditambah ـَانِ (يَفْعَلَانِ/تَفْعَلَانِ), jamak mudzakkar ـُونَ (يَفْعَلُونَ/تَفْعَلُونَ), أَنْتِ ditambah ـِينَ (تَفْعَلِينَ), dan jamak muannats ditambah ـْنَ (يَفْعَلْنَ/تَفْعَلْنَ).",
+      "Kesamaan Rumus Antar-Bab: Seluruh 6 bab Tsulatsi Mujarrad dan Fi'il Mazid (misal يَسْتَفْعِلُ) memakai pola awalan dan akhiran tashrif lughawi yang sama."
+    ],
+    examples: [
+      {
+        ar: 'مُحَمَّدٌ يَفْعَلُ | اثْنَانِ يَفْعَلَانِ | الْمُسْلِمُونَ يَفْعَلُونَ | عَائِشَةُ تَفْعَلُ',
+        tr: 'Muhammad sedang berbuat | Berdua sedang berbuat | Kaum muslimin sedang berbuat | Aisyah sedang berbuat',
+        breakdown: "Penerapan dasar dhamir ghaib/ghaibah ketika digantikan isim zhahir tunggal, berdua (ـَانِ), jamak (ـُونَ), dan perempuan (تَـ)."
+      },
+      {
+        ar: 'يَكْتُبُ — يَكْتُبَانِ — يَكْتُبُونَ — تَكْتُبُ — تَكْتُبَانِ — يَكْتُبْنَ ... أَكْتُبُ — نَكْتُبُ',
+        tr: 'Dia/mereka/saya/kami sedang menulis',
+        breakdown: "Contoh tashrif lughawi Fi'il Mudhari' bab 1 ber-'ain fi'il dhammah (يَفْعُلُ) lengkap dengan perubahan awal dan akhir."
+      },
+      {
+        ar: 'يَجْلِسُ — يَجْلِسَانِ — يَجْلِسُونَ — تَجْلِسُ — تَجْلِسِيْنَ — أَجْلِسُ — نَجْلِسُ',
+        tr: 'Dia/mereka/kamu (pr)/saya/kami sedang duduk',
+        breakdown: "Contoh Fi'il Mudhari' bab 2 ber-'ain fi'il kasrah (يَفْعِلُ) termasuk bentuk mukhathabah أَنْتِ (تَجْلِسِينَ)."
+      },
+      {
+        ar: 'يَعْلَمُ — يَعْلَمَانِ — يَعْلَمُونَ — تَعْلَمُ — تَعْلَمْنَ — أَعْلَمُ — نَعْلَمُ',
+        tr: 'Dia/mereka/kalian (pr)/saya/kami sedang mengetahui',
+        breakdown: "Latihan cepat tashrif Fi'il Mudhari' ber-'ain fi'il fathah (يَفْعَلُ) termasuk bentuk jamak muannats (تَعْلَمْنَ)."
+      },
+      {
+        ar: 'الْأَطِبَّاءُ يَقُولُونَ | الْفَلَّاحُونَ يَحْلِقُونَ',
+        tr: 'Para dokter sedang berbicara | Para petani sedang mencukur/memotong',
+        breakdown: 'Tadribat Fasal 3.d No. 1–2: subjek jamak mudzakkar (الْأَطِبَّاءُ dan الْفَلَّاحُونَ) membutuhkan bentuk dhamir هُمْ (يَـ...ـُونَ).'
+      },
+      {
+        ar: 'يَمُوتُ أَبِي | يَبْحَثُ إِبْرَاهِيمُ',
+        tr: 'Ayahku sedang/akan meninggal | Ibrahim sedang mencari/membahas',
+        breakdown: 'Tadribat Fasal 3.d No. 3–4: fi\'il mudhari\' di awal kalimat sebelum subjek isim zhahir tunggal mudzakkar tetap memakai bentuk هُوَ (يَفْعَلُ).'
+      }
+    ],
+    vocabularies: [
+      { ar: 'التَّصْرِيفُ اللُّغَوِيُّ', id: 'Perubahan kata kerja berdasarkan 14 dhamir', type: 'Isim' },
+      { ar: 'يَفْعَلُ', id: 'Sedang / akan berbuat', type: "Fi'il" },
+      { ar: 'يَكْتُبُ', id: 'Sedang / akan menulis', type: "Fi'il" },
+      { ar: 'يَجْلِسُ', id: 'Sedang / akan duduk', type: "Fi'il" },
+      { ar: 'يَعْلَمُ', id: 'Sedang / akan mengetahui', type: "Fi'il" },
+      { ar: 'يَقُولُ', id: 'Sedang / akan berkata', type: "Fi'il" },
+      { ar: 'يَحْلِقُ', id: 'Sedang / akan mencukur', type: "Fi'il" },
+      { ar: 'يَبْحَثُ', id: 'Sedang / akan mencari / membahas', type: "Fi'il" },
+      { ar: 'الْأَطِبَّاءُ', id: 'Para dokter (jamak dari طَبِيبٌ)', type: 'Isim' },
+      { ar: 'الْفَلَّاحُونَ', id: 'Para petani (jamak dari فَلَّاحٌ)', type: 'Isim' }
+    ]
+  },
+  18: {
+    pekanNumber: 18,
+    moduleIndex: 17,
+    title: "Pekan 18: Tashrif Lughawi Fi'il Amr (6 Dhamir Mukhathab)",
+    arabicTitle: 'التَّصْرِيفُ اللُّغَوِيُّ لِفِعْلِ الْأَمْرِ',
+    kitabReference: "Tabel Tashrif Lughawi Fi'il Amr & Tadribat Mukhtarot",
+    youtubeVideoId: 'bGdqI-eXv3E',
+    youtubeTitle: 'Materi 14c Tashrif Fiil Amr',
+    youtubeChannel: 'Tadribul Lughah',
+    targetOutcome:
+      "Menguasai 6 bentuk tashrif Fi'il Amr untuk orang kedua (Mukhathab/Mukhathabah) beserta kaidah pembentukannya dari Fi'il Mudhari'.",
+    summary:
+      "Video Materi 14c membahas Tashrif Lughawi Fi'il Amr (kata kerja perintah), menjelaskan bahwa Fi'il Amr hanya memiliki 6 bentuk untuk orang kedua (أَنْتَ، أَنْتُمَا، أَنْتُمْ، أَنْتِ، أَنْتُمَا، أَنْتُنَّ) karena perintah tidak ditujukan kepada orang ketiga atau diri sendiri. Dipaparkan langkah membentuk Fi'il Amr dari Fi'il Mudhari' beserta tiga wazan utamanya (أُفْعُلْ، اِفْعِلْ، اِفْعَلْ), contoh fi'il mazid (اِسْتَغْفِرْ), serta latihan Tadribat mengidentifikasi pelaku perintah.",
+    points: [
+      "Cakupan Dhamir Fi'il Amr: hanya berlaku untuk 6 dhamir orang kedua (أَنْتَ، أَنْتُمَا، أَنْتُمْ، أَنْتِ، أَنْتُمَا، أَنْتُنَّ), tidak ada ghaib maupun mutakallim",
+      "Pembentukan dari Fi'il Mudhari': buang huruf mudhara'ah, sukunkan huruf akhir, lalu tambah Hamzah Washal bila huruf awalnya sukun",
+      "Tiga wazan Mujarrad Fi'il Amr: أُفْعُلْ (dari يَفْعُلُ seperti اُكْتُبْ), اِفْعِلْ (dari يَفْعِلُ seperti اِجْلِسْ), dan اِفْعَلْ (dari يَفْعَلُ seperti اِعْلَمْ)",
+      'Akhiran 6 dhamir Fi\'il Amr: أَنْتَ tanpa tambahan (sukun), أَنْتُمَا (ـَا), أَنْتُمْ (ـُوا), أَنْتِ (ـِي), dan أَنْتُنَّ (ـْنَ)',
+      'Aplikasi latihan & Fi\'il Mazid: berlatih mentashrif اِرْفَعْ، اِفْهَمْ، اُدْرُسْ، اِسْتَغْفِرْ serta kalimat perintah seperti يَا بِنْتُ اُخْرُجِي'
+    ],
+    rules: [
+      'Enam Bentuk Fi\'il Amr: Hanya ditashrif untuk dhamir Mukhathab (أَنْتَ، أَنْتُمَا، أَنْتُمْ) dan Mukhathabah (أَنْتِ، أَنْتُمَا، أَنْتُنَّ).',
+      "Penentuan Harakat Hamzah Washal: Berharakat dhammah (اُ) jika 'ain fi'il mudhari' dhammah (أُفْعُلْ), atau berharakat kasrah (اِ) jika 'ain fi'il mudhari' kasrah atau fathah (اِفْعِلْ، اِفْعَلْ).",
+      'Pola Akhiran Fi\'il Amr: أَنْتَ (sukun), أَنْتُمَا (alif ـَا), أَنْتُمْ (wawu jama\'ah ـُوا), أَنْتِ (ya\' mukhathabah ـِي), dan أَنْتُنَّ (nun niswah ـْنَ).'
+    ],
+    examples: [
+      {
+        ar: 'اُكْتُبْ — اُكْتُبَا — اُكْتُبُوا — اُكْتُبِي — اُكْتُبَا — اُكْتُبْنَ',
+        tr: 'Tulislah! (kamu lk / berdua / kalian lk / kamu pr / berdua / kalian pr)',
+        breakdown: "Tashrif lengkap 6 dhamir untuk wazan أُفْعُلْ yang berasal dari mudhari' يَكْتُبُ ('ain fi'il dhammah)."
+      },
+      {
+        ar: 'اِجْلِسْ — اِجْلِسَا — اِجْلِسُوا — اِجْلِسِي — اِجْلِسَا — اِجْلِسْنَ',
+        tr: 'Duduklah! (6 dhamir mukhathab & mukhathabah)',
+        breakdown: "Tashrif lengkap 6 dhamir untuk wazan اِفْعِلْ yang berasal dari mudhari' يَجْلِسُ ('ain fi'il kasrah)."
+      },
+      {
+        ar: 'اِعْلَمْ — اِعْلَمَا — اِعْلَمُوا — اِعْلَمِي — اِعْلَمَا — اِعْلَمْنَ',
+        tr: 'Ketahuilah! (6 dhamir mukhathab & mukhathabah)',
+        breakdown: "Tashrif lengkap 6 dhamir untuk wazan اِفْعَلْ yang berasal dari mudhari' يَعْلَمُ ('ain fi'il fathah)."
+      },
+      {
+        ar: 'اِرْفَعْ — اِفْهَمْ — اُدْرُسْ — اِغْسِلْ — اِسْمَعْ',
+        tr: 'Angkatlah — Pahamilah — Pelajarilah — Cucilah — Dengarkanlah',
+        breakdown: 'Lima kata kerja dari Latihan I di layar untuk melatih perbedaan harakat Hamzah Washal (kasrah vs dhammah).'
+      },
+      {
+        ar: 'اِسْتَغْفِرْ — اِسْتَغْفِرَا — اِسْتَغْفِرُوا — اِسْتَغْفِرِي — اِسْتَغْفِرْنَ',
+        tr: 'Mohonlah ampun! (Fi\'il Mazid)',
+        breakdown: "Contoh tashrif lughawi Fi'il Amr pada fi'il mazid yang tetap memakai akhiran 6 dhamir yang identik."
+      },
+      {
+        ar: 'يَا بِنْتُ اُخْرُجِي | يَا أَخَوَاتِي اُسْجُدْنَ',
+        tr: 'Wahai anak perempuan, keluarlah! | Wahai saudari-saudariku, sujudlah!',
+        breakdown: "Latihan Tadribat No. 1–2: mengenali pelaku perintah tunggal perempuan (ـِي) dan jamak perempuan (ـْنَ)."
+      }
+    ],
+    vocabularies: [
+      { ar: 'اُكْتُبْ', id: 'Tulislah!', type: "Fi'il" },
+      { ar: 'اِجْلِسْ', id: 'Duduklah!', type: "Fi'il" },
+      { ar: 'اِعْلَمْ', id: 'Ketahuilah!', type: "Fi'il" },
+      { ar: 'اِرْفَعْ', id: 'Angkatlah!', type: "Fi'il" },
+      { ar: 'اُدْرُسْ', id: 'Pelajarilah!', type: "Fi'il" },
+      { ar: 'اِسْتَغْفِرْ', id: 'Mohon ampunlah!', type: "Fi'il" },
+      { ar: 'اُخْرُجْ', id: 'Keluarlah!', type: "Fi'il" },
+      { ar: 'اُسْجُدْ', id: 'Sujudlah!', type: "Fi'il" },
+      { ar: 'بِنْتٌ', id: 'Anak perempuan', type: 'Isim' },
+      { ar: 'أَخَوَاتٌ', id: 'Saudari-saudari (jamak dari أُخْتٌ)', type: 'Isim' }
+    ]
+  },
+  19: {
+    pekanNumber: 19,
+    moduleIndex: 18,
+    title: "Pekan 19: Fi'il Ditinjau dari Objeknya (Lazim & Muta'addi)",
+    arabicTitle: 'الْفِعْلُ بِاعْتِبَارِ مَعْمُولِهِ (اللَّازِمُ وَالْمُتَعَدِّي)',
+    kitabReference: 'Mukhtarot Durusul Lughah — Fasal IV (Mind Map & Tadribat)',
+    youtubeVideoId: 'nwFn2jIKMLg',
+    youtubeTitle: 'Materi 15 Fiil Ditinjau Dari Objeknya',
+    youtubeChannel: 'Tadribul Lughah',
+    targetOutcome:
+      "Mampu membedakan Fi'il Lazim (intransitif) dan Fi'il Muta'addi (transitif 1, 2, atau 3 objek) serta memberi harakat manshub pada Maf'ul Bih.",
+    summary:
+      "Video Materi 15 membahas Fasal ke-4 kitab Mukhtarot tentang pembagian Fi'il ditinjau dari ma'mul atau objeknya (Al-Fi'lu bin-Nazhari ila Ma'mulihi). Dijelaskan perbedaan antara Fi'il Lazim (kata kerja intransitif yang sudah sempurna maknanya tanpa objek, seperti قَامَ زَيْدٌ) dengan Fi'il Muta'addi (kata kerja transitif yang membutuhkan Maf'ul Bih berstatus manshub), yang dirinci dalam peta konsep menjadi tiga kategori: butuh 1 objek, 2 objek, atau 3 objek.",
+    points: [
+      "Fasal ke-4 kitab Mukhtarot: pembagian Fi'il ditinjau dari objeknya (مَعْمُولُهُ) menjadi Fi'il Lazim dan Fi'il Muta'addi",
+      "Fi'il Lazim (اللَّازِمُ): kata kerja yang tidak membutuhkan objek karena maknanya sudah lengkap dengan subjek (قَامَ زَيْدٌ، جَلَسَ الرَّجُلُ)",
+      "Fi'il Muta'addi (الْمُتَعَدِّي): kata kerja yang membutuhkan objek (Maf'ul Bih) agar kalimat menjadi sempurna",
+      "Hukum i'rab objek (Maf'ul Bih): setiap objek dalam kalimat wajib berstatus manshub (ditandai fathah pada isim mufrad/jamak taksir)",
+      "Tiga macam Fi'il Muta'addi (Mind Map): butuh 1 objek (قَرَأَ، كَتَبَ), 2 objek (أَعْطَى، جَعَلَ، صَيَّرَ), dan 3 objek (أَخْبَرَ، حَدَّثَ)"
+    ],
+    rules: [
+      "Fi'il Lazim: Kata kerja yang cukup dengan Fi'il + Fa'il (subjek) tanpa membutuhkan Maf'ul Bih (objek).",
+      "Fi'il Muta'addi: Kata kerja yang melampaui subjek dan membutuhkan satu, dua, atau tiga Maf'ul Bih (objek).",
+      "Hukum I'rab Maf'ul Bih: Objek pada kalimat Fi'il Muta'addi selalu berstatus manshub (الدَّرْسَ، الْكِتَابَ، الْكُرْسِيَّ).",
+      "Klasifikasi Jumlah Objek: Muta'addi 1 objek (قَرَأَ، فَهِمَ), 2 objek (أَعْطَى، جَعَلَ، صَيَّرَ), dan 3 objek (أَخْبَرَ، حَدَّثَ)."
+    ],
+    examples: [
+      {
+        ar: 'قَامَ زَيْدٌ | حَضَرَ عَمْرٌو | جَلَسَ الرَّجُلُ',
+        tr: 'Zaid telah berdiri | Amr telah hadir | Laki-laki itu telah duduk',
+        breakdown: "Tiga contoh Fi'il Lazim; kalimat sudah lengkap dan dapat dipahami hanya dengan fi'il dan fa'il (subjek) tanpa objek."
+      },
+      {
+        ar: 'فَهِمَ التَّلَامِيذُ الدَّرْسَ',
+        tr: 'Murid-murid itu telah memahami pelajaran',
+        breakdown: "Fi'il Muta'addi 1 objek; الدَّرْسَ berposisi sebagai Maf'ul Bih sehingga berharakat akhir fathah (manshub)."
+      },
+      {
+        ar: 'قَرَأْتُ الْكِتَابَ | أَخَذَ مُحَمَّدٌ الْكُرْسِيَّ',
+        tr: 'Aku telah membaca buku | Muhammad telah mengambil kursi itu',
+        breakdown: "Fi'il Muta'addi 1 objek dengan الْكِتَابَ dan الْكُرْسِيَّ sebagai Maf'ul Bih yang berharakat manshub."
+      },
+      {
+        ar: 'أَعْطَى مُحَمَّدٌ زَيْدًا هَدِيَّةً',
+        tr: 'Muhammad memberi Zaid sebuah hadiah',
+        breakdown: "Contoh Fi'il Muta'addi yang membutuhkan 2 objek sekaligus (زَيْدًا dan هَدِيَّةً), keduanya manshub."
+      },
+      {
+        ar: 'جَعَلَ اللَّهُ إِبْرَاهِيمَ خَلِيلًا | صَيَّرَ مُحَمَّدٌ الطِّينَ إِبْرِيقًا',
+        tr: 'Allah menjadikan Ibrahim kekasih(-Nya) | Muhammad menjadikan tanah liat itu kendi',
+        breakdown: "Contoh Fi'il Muta'addi 2 objek dengan kata kerja جَعَلَ dan صَيَّرَ yang menashabkan kedua objeknya."
+      },
+      {
+        ar: 'أَخْبَرَ مُحَمَّدٌ زَيْدًا الْأُسْتَاذَ حَاضِرًا',
+        tr: 'Muhammad mengabarkan kepada Zaid bahwa ustadz telah hadir',
+        breakdown: "Contoh Fi'il Muta'addi yang membutuhkan 3 objek (زَيْدًا، الْأُسْتَاذَ، dan حَاضِرًا)."
+      }
+    ],
+    vocabularies: [
+      { ar: 'قَامَ', id: 'Telah berdiri (Lazim)', type: "Fi'il" },
+      { ar: 'حَضَرَ', id: 'Telah hadir / datang (Lazim)', type: "Fi'il" },
+      { ar: 'أَعْطَى', id: 'Telah memberi (Muta\'addi 2 objek)', type: "Fi'il" },
+      { ar: 'جَعَلَ', id: 'Telah menjadikan (Muta\'addi 2 objek)', type: "Fi'il" },
+      { ar: 'صَيَّرَ', id: 'Telah mengubah / menjadikan (Muta\'addi 2 objek)', type: "Fi'il" },
+      { ar: 'أَخْبَرَ', id: 'Telah mengabarkan (Muta\'addi 3 objek)', type: "Fi'il" },
+      { ar: 'التَّلَامِيذُ', id: 'Para murid (jamak dari تِلْمِيذٌ)', type: 'Isim' },
+      { ar: 'الْكُرْسِيُّ', id: 'Kursi', type: 'Isim' },
+      { ar: 'هَدِيَّةٌ', id: 'Hadiah', type: 'Isim' },
+      { ar: 'إِبْرِيقٌ', id: 'Kendi / tembikar', type: 'Isim' }
+    ]
+  },
+  20: {
+    pekanNumber: 20,
+    moduleIndex: 19,
+    title: "Pekan 20: Fi'il Ditinjau dari Subjeknya (Ma'lum & Majhul)",
+    arabicTitle: 'الْفِعْلُ بِاعْتِبَارِ فَاعِلِهِ (الْمَعْلُومُ وَالْمَجْهُولُ)',
+    kitabReference: 'Mukhtarot Durusul Lughah — Fasal V & Lembar Latihan',
+    youtubeVideoId: '5aI_JiGJ04E',
+    youtubeTitle: 'Materi 16 Fiil ditinjau dari subjeknya',
+    youtubeChannel: 'Tadribul Lughah',
+    targetOutcome:
+      "Mampu membedakan kalimat aktif (Ma'lum) dan pasif (Majhul) serta mengubah bentuk Fi'il Madhi dan Mudhari' Ma'lum menjadi Majhul.",
+    summary:
+      "Video Materi 16 membahas Fasal ke-5 kitab Mukhtarot tentang pembagian Fi'il ditinjau dari subjek atau pelakunya (Al-Fi'lu bin-Nazhari ila Fa'ilihi). Dijelaskan perbedaan antara Fi'il Mabni Ma'lum (pelakunya disebutkan/diketahui, kalimat aktif) dan Fi'il Mabni Majhul (pelakunya tidak disebutkan/tidak diketahui, kalimat pasif bermakna 'di-...'), beserta rumus perubahan harakat Fi'il Madhi (kasrah sebelum akhir, dhammah huruf berharakat sebelumnya) dan Fi'il Mudhari' (dhammah huruf pertama, fathah sebelum akhir).",
+    points: [
+      "Fasal ke-5 kitab Mukhtarot: pembagian Fi'il ditinjau dari diketahui atau tidaknya subjek/pelaku (Ma'lum dan Majhul)",
+      "Fi'il Mabni Ma'lum (الْمَبْنِيُّ لِلْمَعْلُومِ): kata kerja aktif yang pelakunya disebutkan atau diketahui (قَرَأَ الْمُذِيعُ الْخَبَرَ)",
+      "Fi'il Mabni Majhul (الْمَبْنِيُّ لِلْمَجْهُولِ): kata kerja pasif yang pelakunya tidak disebutkan sehingga objek menggantikan posisi subjek (قُرِئَ الْخَبَرُ)",
+      "Rumus Majhul Fi'il Madhi: kasrahkan huruf sebelum akhir dan dhammahkan semua huruf berharakat sebelumnya (قَرَأَ ← قُرِئَ، اِسْتَغْفَرَ ← اُسْتُغْفِرَ)",
+      "Rumus Majhul Fi'il Mudhari': dhammahkan huruf pertama (mudhara'ah) dan fathahkan huruf sebelum akhir (يَقْرَأُ ← يُقْرَأُ، يَسْتَغْفِرُ ← يُسْتَغْفَرُ)"
+    ],
+    rules: [
+      "Ma'lum vs Majhul: Fi'il Ma'lum adalah kata kerja aktif yang menyebut subjek/pelaku, sedangkan Fi'il Majhul adalah kata kerja pasif (di-...) tanpa menyebut pelaku.",
+      "Rumus Majhul Fi'il Madhi: Kasrahkan huruf sebelum terakhir dan dhammahkan setiap huruf berharakat sebelumnya (huruf sukun tetap sukun).",
+      "Rumus Majhul Fi'il Mudhari': Dhammahkan huruf pertama (huruf mudhara'ah) dan fathahkan huruf sebelum terakhir.",
+      'Perubahan Struktur Kalimat Pasif: Saat diubah ke Majhul, pelaku (Fa\'il) dihapus dan objeknya menggantikan posisi subjek berharakat rafa\'/dhammah.'
+    ],
+    examples: [
+      {
+        ar: 'قَرَأَ الْمُذِيعُ الْخَبَرَ ← قُرِئَ الْخَبَرُ',
+        tr: 'Penyiar itu membacakan berita ← Berita itu dibacakan',
+        breakdown: "Perubahan kalimat aktif (Ma'lum) dengan pelaku الْمُذِيعُ menjadi pasif (Majhul) tanpa pelaku dengan harakat قُرِئَ."
+      },
+      {
+        ar: 'يَكْتُبُ مُحَمَّدٌ الدَّرْسَ ← يُكْتَبُ الدَّرْسُ',
+        tr: 'Muhammad menulis pelajaran ← Pelajaran itu ditulis',
+        breakdown: "Perubahan Fi'il Mudhari' Ma'lum (يَكْتُبُ) menjadi Majhul (يُكْتَبُ) dan kata الدَّرْسُ naik posisi menjadi subjek pasif (الدَّرْسُ)."
+      },
+      {
+        ar: 'تَسَلَّمَ ← تُسُلِّمَ | قَطَّعَ ← قُطِّعَ | اِسْتَغْفَرَ ← اُسْتُغْفِرَ',
+        tr: 'Menyerahkan ← Diserahkan | Memotong-motong ← Dipotong-potong | Meminta ampun ← Dimintakan ampun',
+        breakdown: "Aplikasi rumus Majhul Fi'il Madhi pada fi'il mazid: huruf sukun (seperti س pada اِسْتَغْفَرَ) tetap sukun, huruf berharakat sebelumnya didhammahkan."
+      },
+      {
+        ar: 'يَتَسَلَّمُ ← يُتَسَلَّمُ | يُقَطِّعُ ← يُقَطَّعُ | يَسْتَغْفِرُ ← يُسْتَغْفَرُ',
+        tr: 'Sedang menyerahkan ← Diserahkan | Memotong ← Dipotong | Meminta ampun ← Dimintakan ampun',
+        breakdown: "Aplikasi rumus Majhul Fi'il Mudhari': dhammahkan huruf pertama (يُـ) dan fathahkan huruf sebelum akhir."
+      },
+      {
+        ar: 'قُتِلَ عَلِيٌّ رَضِيَ اللَّهُ عَنْهُ بِالْكُوفَةِ | سُرِقَ كِتَابِي يَا أُسْتَاذُ',
+        tr: "Ali radhiyallahu 'anhu dibunuh di kota Kufah | Kitabku dicuri wahai Ustadz",
+        breakdown: "Lembar Latihan No. 1 & 4: قُتِلَ dan سُرِقَ berpola فُعِلَ (Fi'il Madhi Majhul) bermakna pasif."
+      },
+      {
+        ar: 'دَخَلَ الْمُدَرِّسُ فِي الْفَصْلِ | أَقَرَأْتُمْ دَرْسَ الْأَمْسِ',
+        tr: 'Pak Guru masuk ke dalam kelas | Apakah kalian telah membaca pelajaran kemarin?',
+        breakdown: "Lembar Latihan No. 2 & 3: contoh Fi'il Ma'lum karena pelakunya diketahui jelas (الْمُدَرِّسُ dan دَخَلَ/تُمْ)."
+      }
+    ],
+    vocabularies: [
+      { ar: 'الْمَعْلُومُ', id: 'Yang diketahui pelakunya (kalimat aktif)', type: 'Isim' },
+      { ar: 'الْمَجْهُولُ', id: 'Yang tidak diketahui pelakunya (kalimat pasif)', type: 'Isim' },
+      { ar: 'الْمُذِيعُ', id: 'Penyiar', type: 'Isim' },
+      { ar: 'الْخَبَرُ', id: 'Berita / kabar', type: 'Isim' },
+      { ar: 'تَسَلَّمَ', id: 'Menyerahkan / menerima', type: "Fi'il" },
+      { ar: 'قَطَّعَ', id: 'Memotong-motong', type: "Fi'il" },
+      { ar: 'قُتِلَ', id: 'Dibunuh (Majhul dari قَتَلَ)', type: "Fi'il" },
+      { ar: 'دَخَلَ', id: 'Telah masuk', type: "Fi'il" },
+      { ar: 'سُرِقَ', id: 'Dicuri (Majhul dari سَرَقَ)', type: "Fi'il" },
+      { ar: 'الْأَمْسِ', id: 'Kemarin', type: 'Isim' }
+    ]
+  },
+  21: {
+    pekanNumber: 21,
+    moduleIndex: 20,
+    title: "Pekan 21: Fi'il Ditinjau dari Tashrifnya (Jamid & Mutasharrif)",
+    arabicTitle: 'الْفِعْلُ بِاعْتِبَارِ التَّصَرُّفِ وَالْجُمُودِ',
+    kitabReference: 'Mukhtarot Durusul Lughah — Fasal VI & Lembar Latihan',
+    youtubeVideoId: 'N5D63ATEjuM',
+    youtubeTitle: 'Materi 17 FIIL DITINJAU DARI TASRIFNYA',
+    youtubeChannel: 'Tadribul Lughah',
+    targetOutcome:
+      "Mampu membedakan Fi'il Jamid (tetap satu bentuk Madhi atau Amr) dan Fi'il Mutasharrif (Tam lengkap 3 bentuk maupun Naqish 2 bentuk).",
+    summary:
+      "Video Materi 17 membahas Fasal ke-6 kitab Mukhtarot tentang pembagian Fi'il ditinjau dari tashrif ishtilahinya (Al-Fi'lu bin-Nazhari ila Tashrifihi). Fi'il terbagi menjadi dua: Fi'il Jamid yang beku tidak bisa berubah ke bentuk fi'il lain (hanya berbentuk Madhi saja seperti لَيْسَ، عَسَى، نِعْمَ، بِئْسَ atau Amr saja seperti هَبْ، تَعَلَّمْ) dan Fi'il Mutasharrif yang bisa berubah bentuk, baik secara sempurna (Tam: Madhi-Mudhari'-Amr seperti كَتَبَ) maupun tidak sempurna (Naqish: Madhi-Mudhari' saja seperti كَادَ dan مَا زَالَ).",
+    points: [
+      "Fasal ke-6 kitab Mukhtarot: pembagian Fi'il ditinjau dari kemampuan perubahan bentuk antar-fi'il (Tashrif Ishtilahi)",
+      "Fi'il Jamid (الْجَامِدُ): fi'il yang beku pada satu bentuk saja, baik senantiasa Fi'il Madhi (لَيْسَ، عَسَى، نِعْمَ، بِئْسَ) maupun senantiasa Fi'il Amr (هَبْ، تَعَلَّمْ)",
+      "Penegasan penting: kata seperti لَيْسَ dan مَا دَامَ adalah fi'il (dapat ditashrif lughawi: لَيْسَ، لَيْسَا، لَيْسُوا), bukan isim ataupun huruf",
+      "Fi'il Mutasharrif Tam (مُتَصَرِّفٌ تَامٌّ): dapat berubah sempurna menjadi Fi'il Madhi, Mudhari', dan Amr (كَتَبَ – يَكْتُبُ – اُكْتُبْ)",
+      "Fi'il Mutasharrif Naqish (مُتَصَرِّفٌ نَاقِصٌ): hanya memiliki bentuk Fi'il Madhi dan Mudhari' tanpa Fi'il Amr (مَا زَالَ – مَا يَزَالُ، كَادَ – يَكَادُ)"
+    ],
+    rules: [
+      "Fi'il Jamid: Kata kerja yang hanya memiliki satu bentuk tetap dan tidak mengalami tashrif ishtilahi (tidak memiliki bentuk lain).",
+      "Dua Jenis Fi'il Jamid: Kelompok yang hanya berbentuk Madhi (لَيْسَ، مَا دَامَ، عَسَى، نِعْمَ، بِئْسَ، خَلَا، عَدَا) dan hanya berbentuk Amr (هَبْ، تَعَلَّمْ bermakna yakinilah).",
+      "Mutasharrif Tam: Fi'il yang lengkap ketiga bentuk waktunya (Madhi, Mudhari', dan Amr), mencakup mayoritas kata kerja Arab.",
+      "Mutasharrif Naqish: Fi'il yang hanya memiliki bentuk Madhi dan Mudhari' saja tanpa bentuk Amr (مَا زَالَ، مَا انْفَكَّ، مَا فَتِئَ، أَوْشَكَ، كَادَ، طَفِقَ)."
+    ],
+    examples: [
+      {
+        ar: 'لَيْسَ — مَا دَامَ — عَسَى — نِعْمَ — بِئْسَ',
+        tr: 'Bukan/tidak — Selama — Semoga/bisa jadi — Sebaik-baik — Seburuk-buruk',
+        breakdown: "Contoh Fi'il Jamid yang senantiasa berbentuk Fi'il Madhi dan tidak memiliki bentuk Mudhari' maupun Amr."
+      },
+      {
+        ar: 'هَبْ (أَنْ...) — تَعَلَّمْ (أَنَّ...)',
+        tr: 'Anggaplah / misalkanlah — Ketahuilah / yakinilah',
+        breakdown: "Contoh Fi'il Jamid yang senantiasa berbentuk Fi'il Amr (dibedakan dari تَعَلَّمَ-يَتَعَلَّمُ-تَعَلَّمْ yang berarti belajar)."
+      },
+      {
+        ar: 'كَتَبَ ← يَكْتُبُ ← اُكْتُبْ | جَلَسَ ← يَجْلِسُ ← اِجْلِسْ | فَتَحَ ← يَفْتَحُ ← اِفْتَحْ',
+        tr: 'Menulis — Sedang menulis — Tulislah | Duduk | Membuka',
+        breakdown: "Contoh Fi'il Mutasharrif Tam karena memiliki ketiga bentuk sempurna: Madhi, Mudhari', dan Amr."
+      },
+      {
+        ar: 'مَا زَالَ ← مَا يَزَالُ | مَا انْفَكَّ ← مَا يَنْفَكُّ | مَا فَتِئَ ← مَا يَفْتَأُ',
+        tr: 'Senantiasa / masih',
+        breakdown: "Contoh Fi'il Mutasharrif Naqish karena hanya berubah antara Madhi dan Mudhari' tanpa memiliki bentuk Fi'il Amr."
+      },
+      {
+        ar: 'كَادَ ← يَكَادُ | أَوْشَكَ ← يُوشِكُ | طَفِقَ ← يَطْفَقُ',
+        tr: 'Hampir — Hampir — Mulai/berbuat',
+        breakdown: "Contoh lain Fi'il Mutasharrif Naqish (Af'alul Muqarabah & Syuru') yang hanya memiliki bentuk Madhi dan Mudhari'."
+      },
+      {
+        ar: 'تَعَلَّمَ ← يَتَعَلَّمُ ← تَعَلَّمْ | فَارَقَ ← يُفَارِقُ ← فَارِقْ',
+        tr: 'Belajar — Sedang belajar — Belajarlah | Memisahkan — Berpisah — Pisahkanlah',
+        breakdown: 'Lembar Latihan No. 1 & 3: keduanya termasuk Fi\'il Mutasharrif Tam karena memiliki ketiga bentuk fi\'il secara utuh.'
+      }
+    ],
+    vocabularies: [
+      { ar: 'الْجَامِدُ', id: 'Beku / tetap tidak berubah ke bentuk fi\'il lain', type: 'Isim' },
+      { ar: 'الْمُتَصَرِّفُ', id: 'Dapat berubah bentuk ke fi\'il lain', type: 'Isim' },
+      { ar: 'تَامٌّ', id: 'Sempurna (lengkap Madhi, Mudhari\', Amr)', type: 'Isim' },
+      { ar: 'نَاقِصٌ', id: 'Tidak sempurna (hanya Madhi & Mudhari\')', type: 'Isim' },
+      { ar: 'لَيْسَ', id: 'Bukan / tidak ada (Jamid Madhi)', type: "Fi'il" },
+      { ar: 'عَسَى', id: 'Semoga / bisa jadi (Jamid Madhi)', type: "Fi'il" },
+      { ar: 'نِعْمَ', id: 'Sebaik-baik (Jamid Madhi)', type: "Fi'il" },
+      { ar: 'بِئْسَ', id: 'Seburuk-buruk (Jamid Madhi)', type: "Fi'il" },
+      { ar: 'كَادَ', id: 'Hampir (Mutasharrif Naqish)', type: "Fi'il" },
+      { ar: 'فَارَقَ', id: 'Memisahkan / berpisah (Mutasharrif Tam)', type: "Fi'il" }
+    ]
+  },
+  22: {
+    pekanNumber: 22,
+    moduleIndex: 21,
+    title: "Pekan 22: Fi'il Ditinjau dari Perubahannya (Mabni & Mu'rab)",
+    arabicTitle: 'الْفِعْلُ بِاعْتِبَارِ الْإِعْرَابِ وَالْبِنَاءِ',
+    kitabReference: 'Mukhtarot Durusul Lughah — Fasal VII (hal. 51) & Lembar Latihan',
+    youtubeVideoId: '6fkb786TAfs',
+    youtubeTitle: 'Materi 18 FIIL DITINJAU DARI PERUBAHANNYA',
+    youtubeChannel: 'Tadribul Lughah',
+    targetOutcome:
+      "Mampu membedakan Fi'il Mabni (semua Madhi, semua Amr, dan Mudhari' dengan Nun Niswah/Taukid) dengan Fi'il Mu'rab (Rafa', Nashab, Jazm).",
+    summary:
+      "Video Materi 18 membahas Fasal ke-7 kitab Mukhtarot (hal. 51) mengenai Fi'il ditinjau dari perubahan harakat akhirnya akibat masuknya 'amil (Al-Fi'lu bin-Nazhari ila Taghyirihi). Dijelaskan rincian Fi'il Mabni (harakat akhir tetap: seluruh Fi'il Madhi, seluruh Fi'il Amr, dan Fi'il Mudhari' yang bersambung langsung dengan Nun Niswah atau Nun Taukid) beserta tanda-tanda bina'nya, serta Fi'il Mu'rab yaitu Fi'il Mudhari' selain kondisi tersebut dengan tiga keadaan i'rab (Marfu', Manshub, Majzum) tanpa Majrur.",
+    points: [
+      "Fasal ke-7 kitab Mukhtarot (hal. 51): membedakan perubahan i'rab (akibat masuknya 'amil seperti لَنْ dan لَمْ) dengan perubahan tashrif",
+      "Tiga kelompok Fi'il Mabni (الْمَبْنِيُّ): seluruh Fi'il Madhi, seluruh Fi'il Amr, dan Fi'il Mudhari' yang bersambung langsung dengan Nun Niswah atau Nun Taukid",
+      "Tanda bina' Fi'il Madhi: mabni fathah (فَعَلَ، فَعَلَتْ، ضَرَبَهُ), mabni dhammah (فَعَلُوا dengan wawu jama'ah), dan mabni sukun (فَعَلْنَ، فَعَلْتَ، فَعَلْنَا)",
+      "Tanda bina' Fi'il Amr: sukun (اِفْعَلْ، اِفْعَلْنَ), hadzfun nun (اِفْعَلَا، اِفْعَلُوا، اِفْعَلِي), hadzfu harfil 'illah (اُغْزُ), dan fathah (اِفْعَلَنَّ)",
+      "Fi'il Mu'rab (الْمُعْرَبُ): hanya Fi'il Mudhari' yang tidak bersambung langsung dengan Nun Niswah/Taukid; ber-i'rab Rafa', Nashab, dan Jazm (tanpa Jar)"
+    ],
+    rules: [
+      "Fi'il Mabni: Fi'il yang harakat akhirnya tidak berubah meski kemasukan 'amil; mencakup seluruh Madhi, seluruh Amr, dan Mudhari' yang bersambung langsung dengan Nun Niswah (sukun) atau Nun Taukid (fathah).",
+      "Tanda Bina' Fi'il Madhi: Mabni fathah (asalnya, atau bersambung alif/ta' ta'nits/dhamir nashab), mabni dhammah (bersambung wawu jama'ah), dan mabni sukun (bersambung nun niswah, ta' fa'il, atau نَا).",
+      "Tanda Bina' Fi'il Amr: Sukun (shahih akhir / nun niswah), membuang nun (alif itsnain, wawu jama'ah, ya' mukhathabah), membuang huruf 'illah (mu'tal akhir), dan fathah (nun taukid).",
+      "Fi'il Mu'rab & 3 Keadaan I'rabnya: Fi'il Mudhari' yang bebas dari Nun Niswah dan Nun Taukid langsung dapat berubah menjadi Marfu' (يَرْجِعُ), Manshub (لَنْ يَرْجِعَ), dan Majzum (لَمْ يَرْجِعْ), serta tidak mengenal Jar/Majrur."
+    ],
+    examples: [
+      {
+        ar: 'فَعَلَ — فَعَلَا — فَعَلَتْ | فَعَلُوا | فَعَلْنَ — فَعَلْتَ — فَعَلْنَا',
+        tr: 'Mabni Fathah | Mabni Dhammah (wawu jama\'ah) | Mabni Sukun (nun niswah, ta\' fa\'il, na)',
+        breakdown: "Tiga tanda bina' pada Fi'il Madhi sesuai kata ganti yang bersambung di akhirnya."
+      },
+      {
+        ar: 'يَكْتُبْنَ — لَنْ يَكْتُبْنَ — لَمْ يَكْتُبْنَ | يَكْتُبَنَّ — لَنْ يَكْتُبَنَّ',
+        tr: 'Mereka (pr) menulis / tidak akan menulis / belum menulis | Dia benar-benar menulis / tidak akan menulis',
+        breakdown: "Fi'il Mudhari' menjadi Mabni Sukun karena Nun Niswah dan Mabni Fathah karena Nun Taukid langsung sehingga kebal terhadap لَنْ dan لَمْ."
+      },
+      {
+        ar: 'اِفْعَلْ / اِفْعَلْنَ | اِفْعَلَا / اِفْعَلُوا / اِفْعَلِي | اُغْزُ | اِفْعَلَنَّ',
+        tr: 'Kerjakanlah! (Sukun) | (Buang Nun) | Berperanglah! (Buang huruf \'illah) | Benar-benar kerjakanlah! (Fathah)',
+        breakdown: "Empat macam tanda bina' Fi'il Amr: sukun, hadzfun nun, hadzfu harfil 'illah (dari تَغْزُو), dan fathah."
+      },
+      {
+        ar: 'هُوَ يَكْتُبُ — هُوَ لَنْ يَكْتُبَ — هُوَ لَمْ يَكْتُبْ',
+        tr: 'Dia sedang menulis (Marfu\') — Tidak akan menulis (Manshub) — Belum menulis (Majzum)',
+        breakdown: "Contoh Fi'il Mu'rab (Fi'il Mudhari' shahih akhir) yang harakat akhirnya berubah mengikuti 'amil رَفْعٌ، نَصْبٌ، جَزْمٌ."
+      },
+      {
+        ar: 'يَرْجِعُ ← لَنْ يَرْجِعَ ← لَمْ يَرْجِعْ',
+        tr: 'Dia kembali ← tidak akan kembali ← belum kembali',
+        breakdown: "Contoh lisan pembicara yang menunjukkan Fi'il Mu'rab tidak memiliki keadaan majrur, melainkan hanya marfu', manshub, dan majzum."
+      },
+      {
+        ar: 'يَقُولُونَ ← لَمْ يَقُولُوا / لَنْ يَقُولُوا | تَعَلَّمْتُ | يَحْلِقُ',
+        tr: 'Mereka berkata (Mu\'rab Af\'alul Khamsah) | Aku telah belajar (Mabni Sukun) | Mencukur (Mu\'rab)',
+        breakdown: "Lembar Latihan Fasal 7 No. 1, 2, dan 4: membedakan Fi'il Mu'rab (يَقُولُونَ، يَحْلِقُ) dan Fi'il Mabni (قَدَّمَ، تَعَلَّمْتُ)."
+      }
+    ],
+    vocabularies: [
+      { ar: 'التَّغْيِيرُ', id: 'Perubahan harakat akhir', type: 'Isim' },
+      { ar: 'الْعَامِلُ', id: 'Faktor / kata yang mengubah harakat akhir', type: 'Isim' },
+      { ar: 'نُونُ النِّسْوَةِ', id: 'Nun penunjuk jamak perempuan', type: 'Isim' },
+      { ar: 'نُونُ التَّوْكِيدِ', id: 'Nun penegasan / penguat makna', type: 'Isim' },
+      { ar: 'حَذْفُ النُّونِ', id: 'Membuang huruf nun', type: 'Isim' },
+      { ar: 'مَرْفُوعٌ', id: 'Ber-i\'rob rafa\' (dhammah / tetapnya nun)', type: 'Isim' },
+      { ar: 'مَنْصُوبٌ', id: 'Ber-i\'rob nashab (fathah / buang nun)', type: 'Isim' },
+      { ar: 'مَجْزُومٌ', id: 'Ber-i\'rob jazm (sukun / buang nun / buang \'illah)', type: 'Isim' },
+      { ar: 'يَرْجِعُ', id: 'Sedang kembali / pulang', type: "Fi'il" },
+      { ar: 'اُغْزُ', id: 'Berperanglah / seranglah! (Fi\'il Amr mu\'tal)', type: "Fi'il" }
+    ]
   }
 };
 

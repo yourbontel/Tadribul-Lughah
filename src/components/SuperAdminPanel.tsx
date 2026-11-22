@@ -441,6 +441,9 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
   const [verifyingRegistration, setVerifyingRegistration] = useState<RegistrationRecord | null>(null);
   const [paymentCountInput, setPaymentCountInput] = useState<number>(0);
   const [paymentAmountInput, setPaymentAmountInput] = useState<number>(0);
+  const [monthlyExtraPaymentsInput, setMonthlyExtraPaymentsInput] = useState<Record<string, number>>({});
+  const [targetPaymentMonth, setTargetPaymentMonth] = useState<number>(1);
+  const [customAddPaymentInput, setCustomAddPaymentInput] = useState<string>('');
   const [paymentDateInput, setPaymentDateInput] = useState<string>('');
   const [paymentBankMethod, setPaymentBankMethod] = useState<string>('Bank Syariah Indonesia (BSI)');
   const [paymentAdminNote, setPaymentAdminNote] = useState<string>('');
@@ -1767,6 +1770,11 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
 
     setPaymentCountInput(currentCount);
     setPaymentAmountInput(currentPaid);
+    setMonthlyExtraPaymentsInput(
+      record.monthlyExtraPayments ? { ...record.monthlyExtraPayments } : {}
+    );
+    setTargetPaymentMonth(Math.min(6, Math.max(1, currentCount + 1)));
+    setCustomAddPaymentInput('');
 
     const nowStr = new Intl.DateTimeFormat('id-ID', {
       day: 'numeric',
@@ -1781,11 +1789,45 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
   const handleQuickSetInstallment = (count: number) => {
     if (!verifyingRegistration) return;
     const totalTuition = verifyingRegistration.totalTuitionIDR || 510000;
-    const monthly = Math.round(totalTuition / 6);
+    const monthly = Math.round(totalTuition / 6) || 85000;
     const clampedCount = Math.max(0, Math.min(6, count));
-    const calculatedPaid = clampedCount === 6 ? totalTuition : clampedCount * monthly;
+    if (clampedCount === 0) {
+      setPaymentCountInput(0);
+      setPaymentAmountInput(0);
+      setMonthlyExtraPaymentsInput({});
+      setTargetPaymentMonth(1);
+      return;
+    }
+    const currentExtra = Math.max(0, paymentAmountInput - paymentCountInput * monthly);
+    const basePaid = clampedCount === 6 ? totalTuition : clampedCount * monthly;
     setPaymentCountInput(clampedCount);
-    setPaymentAmountInput(calculatedPaid);
+    setPaymentAmountInput(basePaid + currentExtra);
+    setTargetPaymentMonth(clampedCount);
+  };
+
+  const handleAddPaymentAmount = (addAmount: number) => {
+    if (!verifyingRegistration || !addAmount || addAmount <= 0) return;
+    const newPaid = Math.max(0, paymentAmountInput + addAmount);
+    const targetKey = String(Math.min(6, Math.max(1, targetPaymentMonth)));
+
+    setPaymentAmountInput(newPaid);
+    setMonthlyExtraPaymentsInput((prev) => ({
+      ...prev,
+      [targetKey]: (Number(prev[targetKey]) || 0) + addAmount
+    }));
+    setCustomAddPaymentInput('');
+  };
+
+  const handleRemoveMonthExtra = (month: number) => {
+    const key = String(month);
+    const existingExtra = Number(monthlyExtraPaymentsInput[key]) || 0;
+    if (existingExtra <= 0) return;
+    setMonthlyExtraPaymentsInput((prev) => {
+      const next = { ...prev };
+      delete next[key];
+      return next;
+    });
+    setPaymentAmountInput((prev) => Math.max(0, prev - existingExtra));
   };
 
   const handleSavePaymentVerification = async () => {
@@ -1793,14 +1835,21 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
     setIsSaving(true);
     setStatusMessage(null);
 
-    const totalTuition = verifyingRegistration.totalTuitionIDR || 510000;
-    const isLunas = paymentCountInput >= 6 || paymentAmountInput >= totalTuition;
+    const isLunas = paymentCountInput >= 6;
     const noteStr = `${paymentDateInput} · ${paymentBankMethod}${paymentAdminNote.trim() ? ` (${paymentAdminNote.trim()})` : ''}`;
+
+    const cleanedExtraEntries = Object.entries(monthlyExtraPaymentsInput)
+      .filter(([k, v]) => ['1', '2', '3', '4', '5', '6'].includes(k) && typeof v === 'number' && v > 0)
+      .map(([k, v]) => [k, Math.round(v)] as const);
+    const cleanedExtraMap = cleanedExtraEntries.length > 0
+      ? Object.fromEntries(cleanedExtraEntries)
+      : undefined;
 
     const updatedRecord: RegistrationRecord = {
       ...verifyingRegistration,
       paidTuitionIDR: paymentAmountInput,
       installmentPaidCount: paymentCountInput,
+      monthlyExtraPayments: cleanedExtraMap,
       paymentPlan: isLunas ? 'lunas' : 'cicilan',
       lastPaymentDate: noteStr
     };
@@ -1890,8 +1939,7 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
     const count = typeof r.installmentPaidCount === 'number'
       ? r.installmentPaidCount
       : Math.min(6, Math.floor(paid / (monthly || 85000)));
-    const remaining = Math.max(0, total - paid);
-    const isLunas = count >= 6 || (paid >= total && total > 0);
+    const isLunas = count >= 6;
 
     let matchesPayment = true;
     if (filterPayment === 'unpaid') {
@@ -1919,14 +1967,16 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
   const totalLunas = registrations.filter((r) => {
     const total = r.totalTuitionIDR || 510000;
     const paid = typeof r.paidTuitionIDR === 'number' ? r.paidTuitionIDR : 0;
-    const count = typeof r.installmentPaidCount === 'number' ? r.installmentPaidCount : 0;
-    return count >= 6 || (paid >= total && total > 0);
+    const count = typeof r.installmentPaidCount === 'number'
+      ? r.installmentPaidCount
+      : Math.min(6, Math.floor(paid / (Math.round(total / 6) || 85000)));
+    return count >= 6;
   }).length;
   const totalBelumLunas = registrations.filter((r) => {
     const total = r.totalTuitionIDR || 510000;
     const paid = typeof r.paidTuitionIDR === 'number' ? r.paidTuitionIDR : 0;
     const count = typeof r.installmentPaidCount === 'number' ? r.installmentPaidCount : 0;
-    return count === 0 && paid === 0;
+    return count === 0 && paid === 0 && total > 0;
   }).length;
 
   const handleExportCsv = () => {
@@ -1949,8 +1999,10 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
     const rows = filteredRegistrations.map((r) => {
       const total = r.totalTuitionIDR || 510000;
       const paid = typeof r.paidTuitionIDR === 'number' ? r.paidTuitionIDR : 0;
-      const count = typeof r.installmentPaidCount === 'number' ? r.installmentPaidCount : 0;
-      const isLunas = count >= 6 || (paid >= total && total > 0);
+      const count = typeof r.installmentPaidCount === 'number'
+        ? r.installmentPaidCount
+        : Math.min(6, Math.floor(paid / (Math.round(total / 6) || 85000)));
+      const isLunas = count >= 6;
       const payStatusStr = isLunas ? 'Lunas Penuh (6/6)' : count > 0 ? `Cicilan ${count}/6` : 'Belum Lunas (Bulan 1)';
 
       return [
@@ -2001,8 +2053,10 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
       .map((r, idx) => {
         const total = r.totalTuitionIDR || 510000;
         const paid = typeof r.paidTuitionIDR === 'number' ? r.paidTuitionIDR : 0;
-        const count = typeof r.installmentPaidCount === 'number' ? r.installmentPaidCount : 0;
-        const isLunas = count >= 6 || (paid >= total && total > 0);
+        const count = typeof r.installmentPaidCount === 'number'
+          ? r.installmentPaidCount
+          : Math.min(6, Math.floor(paid / (Math.round(total / 6) || 85000)));
+        const isLunas = count >= 6;
         const payStatusStr = isLunas ? 'Lunas Penuh (6/6)' : count > 0 ? `Cicilan ${count}/6` : 'Belum Lunas (Bulan 1)';
 
         return `${idx + 1}. [${r.registrationNumber}] ${r.fullName} (${r.gender || 'Laki-laki'}) · ${getRegistrationAngkatan(r)} · ${r.selectedProgramName} · WA: ${r.whatsapp} · Domisili: ${r.city} · Bayar: ${payStatusStr}`;
@@ -2204,6 +2258,7 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
 
     for (const reg of registrations) {
       const tuition = reg.totalTuitionIDR || 510000;
+      const monthly = Math.round(tuition / 6) || 85000;
       grossPotential += tuition;
 
       const paid = typeof reg.paidTuitionIDR === 'number'
@@ -2211,14 +2266,15 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
         : 0;
 
       totalCashCollected += paid;
-      const remaining = Math.max(0, tuition - paid);
-      totalReceivables += remaining;
 
       const count = typeof reg.installmentPaidCount === 'number'
         ? reg.installmentPaidCount
-        : Math.min(6, Math.floor(paid / (Math.round(tuition / 6) || 85000)));
+        : Math.min(6, Math.floor(paid / monthly));
 
-      if (count >= 6 || remaining === 0) {
+      const remaining = Math.max(0, (6 - count) * monthly);
+      totalReceivables += remaining;
+
+      if (count >= 6) {
         fullyPaidCount++;
       } else if (count > 0) {
         installmentPayingCount++;
@@ -2299,19 +2355,19 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
       (r.email && r.email.toLowerCase().includes(q));
 
     const tuition = r.totalTuitionIDR || 510000;
+    const monthly = Math.round(tuition / 6) || 85000;
     const paid = typeof r.paidTuitionIDR === 'number'
       ? r.paidTuitionIDR
       : 0;
     const count = typeof r.installmentPaidCount === 'number'
       ? r.installmentPaidCount
-      : Math.min(6, Math.floor(paid / (Math.round(tuition / 6) || 85000)));
-    const remaining = Math.max(0, tuition - paid);
+      : Math.min(6, Math.floor(paid / monthly));
 
     let matchesStatus = true;
     if (financeStatusFilter === 'lunas') {
-      matchesStatus = count >= 6 || remaining === 0;
+      matchesStatus = count >= 6;
     } else if (financeStatusFilter === 'cicilan') {
-      matchesStatus = count > 0 && count < 6 && remaining > 0;
+      matchesStatus = count > 0 && count < 6;
     } else if (financeStatusFilter === 'unpaid') {
       matchesStatus = count === 0 && paid === 0;
     }
@@ -2344,14 +2400,15 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
 
     const rows = filteredFinanceRegistrations.map((r) => {
       const tuition = r.totalTuitionIDR || 510000;
+      const monthly = Math.round(tuition / 6) || 85000;
       const paid = typeof r.paidTuitionIDR === 'number'
         ? r.paidTuitionIDR
         : 0;
-      const remaining = Math.max(0, tuition - paid);
       const count = typeof r.installmentPaidCount === 'number'
         ? r.installmentPaidCount
-        : Math.min(6, Math.floor(paid / (Math.round(tuition / 6) || 85000)));
-      const lunasStatus = count >= 6 || remaining === 0 ? 'Lunas (6/6)' : count > 0 ? `Cicilan ${count}/6` : 'Belum Lunas (Bulan 1)';
+        : Math.min(6, Math.floor(paid / monthly));
+      const remaining = Math.max(0, (6 - count) * monthly);
+      const lunasStatus = count >= 6 ? 'Lunas (6/6)' : count > 0 ? `Cicilan ${count}/6` : 'Belum Lunas (Bulan 1)';
       const angkatan = getRegistrationAngkatan(r);
 
       return [
@@ -5527,15 +5584,16 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
                                   <td className="py-3 px-4 font-mono">
                                     {(() => {
                                       const total = r.totalTuitionIDR || 510000;
-                                      const monthly = Math.round(total / 6);
+                                      const monthly = Math.round(total / 6) || 85000;
                                       const paid = typeof r.paidTuitionIDR === 'number'
                                         ? r.paidTuitionIDR
                                         : 0;
                                       const count = typeof r.installmentPaidCount === 'number'
                                         ? r.installmentPaidCount
-                                        : Math.min(6, Math.floor(paid / (monthly || 85000)));
-                                      const remaining = Math.max(0, total - paid);
-                                      const isLunas = count >= 6 || remaining === 0;
+                                        : Math.min(6, Math.floor(paid / monthly));
+                                      const remaining = Math.max(0, (6 - count) * monthly);
+                                      const isLunas = count >= 6;
+                                      const extraAmount = Math.max(0, paid - count * monthly);
 
                                       return (
                                         <div className="space-y-1">
@@ -5560,8 +5618,13 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
                                           <div className="text-[11px] text-slate-800">
                                             Terbayar: <strong className="text-emerald-800">{formatIDR(paid)}</strong>
                                           </div>
+                                          {extraAmount > 0 && (
+                                            <div className="text-[10px] text-sky-700 font-semibold">
+                                              + Uang Tambahan {formatIDR(extraAmount)}
+                                            </div>
+                                          )}
                                           <div className="text-[10px] text-slate-500">
-                                            {isLunas ? `Total: ${formatIDR(total)}` : `Sisa: ${formatIDR(remaining)} (@ ${formatIDR(monthly)}/bln)`}
+                                            {isLunas ? `Total Wajib: ${formatIDR(total)}` : `Sisa: ${formatIDR(remaining)} (@ ${formatIDR(monthly)}/bln)`}
                                           </div>
                                         </div>
                                       );
@@ -5965,18 +6028,33 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
                                   value={editingRegistration.paidTuitionIDR ?? 0}
                                   onChange={(e) => {
                                     const val = Number(e.target.value) || 0;
-                                    const monthly = Math.round(editingRegistration.totalTuitionIDR / 6);
-                                    const autoCount = Math.min(6, Math.floor(val / (monthly || 85000)));
+                                    const monthly = Math.round(editingRegistration.totalTuitionIDR / 6) || 85000;
+                                    const currentCount = typeof editingRegistration.installmentPaidCount === 'number'
+                                      ? editingRegistration.installmentPaidCount
+                                      : Math.min(6, Math.floor(val / monthly));
                                     setEditingRegistration({
                                       ...editingRegistration,
                                       paidTuitionIDR: val,
-                                      installmentPaidCount: autoCount,
-                                      paymentPlan: val >= editingRegistration.totalTuitionIDR ? 'lunas' : 'cicilan'
+                                      installmentPaidCount: currentCount,
+                                      paymentPlan: currentCount >= 6 ? 'lunas' : 'cicilan'
                                     });
                                   }}
                                   className="w-full px-3 py-2 text-xs font-mono bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-emerald-800"
-                                  placeholder="Contoh: 85000 atau 170000"
+                                  placeholder="Contoh: 85000 atau 100000"
                                 />
+                                {(() => {
+                                  const totalT = editingRegistration.totalTuitionIDR || 510000;
+                                  const monthlyT = Math.round(totalT / 6) || 85000;
+                                  const paidT = editingRegistration.paidTuitionIDR ?? 0;
+                                  const countT = editingRegistration.installmentPaidCount ?? Math.min(6, Math.floor(paidT / monthlyT));
+                                  const extraT = Math.max(0, paidT - countT * monthlyT);
+                                  if (extraT <= 0) return null;
+                                  return (
+                                    <p className="text-[10px] text-sky-700 font-semibold mt-1">
+                                      + Uang Tambahan: {formatIDR(extraT)} (tidak masuk ke bulan berikutnya)
+                                    </p>
+                                  );
+                                })()}
                               </div>
 
                               <div>
@@ -5987,8 +6065,13 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
                                   value={editingRegistration.installmentPaidCount ?? 0}
                                   onChange={(e) => {
                                     const count = Number(e.target.value);
-                                    const monthly = Math.round(editingRegistration.totalTuitionIDR / 6);
-                                    const calcPaid = count === 6 ? editingRegistration.totalTuitionIDR : count * monthly;
+                                    const totalT = editingRegistration.totalTuitionIDR || 510000;
+                                    const monthly = Math.round(totalT / 6) || 85000;
+                                    const prevCount = editingRegistration.installmentPaidCount ?? 0;
+                                    const prevPaid = editingRegistration.paidTuitionIDR ?? 0;
+                                    const currentExtra = Math.max(0, prevPaid - prevCount * monthly);
+                                    const basePaid = count === 6 ? totalT : count * monthly;
+                                    const calcPaid = count === 0 ? 0 : basePaid + currentExtra;
                                     setEditingRegistration({
                                       ...editingRegistration,
                                       installmentPaidCount: count,
@@ -6574,11 +6657,13 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
                                 const paid = typeof r.paidTuitionIDR === 'number'
                                   ? r.paidTuitionIDR
                                   : 0;
+                                const monthly = Math.round(tuition / 6) || 85000;
                                 const count = typeof r.installmentPaidCount === 'number'
                                   ? r.installmentPaidCount
-                                  : Math.min(6, Math.floor(paid / (Math.round(tuition / 6) || 85000)));
-                                const remaining = Math.max(0, tuition - paid);
-                                const isLunas = count >= 6 || remaining === 0;
+                                  : Math.min(6, Math.floor(paid / monthly));
+                                const remaining = Math.max(0, (6 - count) * monthly);
+                                const isLunas = count >= 6;
+                                const extraAmount = Math.max(0, paid - count * monthly);
 
                                 return (
                                   <tr key={r.registrationNumber} className="hover:bg-slate-50/80 transition-colors">
@@ -6618,20 +6703,41 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
                                     </td>
                                     <td className="py-3 px-3.5 text-center">
                                       {isLunas ? (
-                                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300">
-                                          <Check className="w-3 h-3 text-emerald-700" />
-                                          Lunas (6/6)
-                                        </span>
+                                        <div className="space-y-0.5">
+                                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300">
+                                            <Check className="w-3 h-3 text-emerald-700" />
+                                            Lunas (6/6)
+                                          </span>
+                                          {extraAmount > 0 && (
+                                            <div className="text-[10px] font-mono text-sky-700 font-semibold">
+                                              + Uang Tambahan {formatIDR(extraAmount)}
+                                            </div>
+                                          )}
+                                        </div>
                                       ) : count > 0 ? (
-                                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-900 border border-amber-300">
-                                          <CreditCard className="w-3 h-3 text-amber-700" />
-                                          Cicilan {count}/6
-                                        </span>
+                                        <div className="space-y-0.5">
+                                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-900 border border-amber-300">
+                                            <CreditCard className="w-3 h-3 text-amber-700" />
+                                            Cicilan {count}/6
+                                          </span>
+                                          {extraAmount > 0 && (
+                                            <div className="text-[10px] font-mono text-sky-700 font-semibold">
+                                              + Uang Tambahan {formatIDR(extraAmount)}
+                                            </div>
+                                          )}
+                                        </div>
                                       ) : (
-                                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-rose-100 text-rose-950 border border-rose-300">
-                                          <AlertCircle className="w-3 h-3 text-rose-700 shrink-0" />
-                                          <span>Belum Lunas (Bulan 1)</span>
-                                        </span>
+                                        <div className="space-y-0.5">
+                                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-rose-100 text-rose-950 border border-rose-300">
+                                            <AlertCircle className="w-3 h-3 text-rose-700 shrink-0" />
+                                            <span>Belum Lunas (Bulan 1)</span>
+                                          </span>
+                                          {extraAmount > 0 && (
+                                            <div className="text-[10px] font-mono text-sky-700 font-semibold">
+                                              + Uang Tambahan {formatIDR(extraAmount)}
+                                            </div>
+                                          )}
+                                        </div>
                                       )}
                                     </td>
                                     <td className="py-3 px-3.5 text-[11px] text-slate-600 max-w-xs">
@@ -8289,16 +8395,21 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
              ===================================================================== */}
           {isPaymentModalOpen && verifyingRegistration && (() => {
             const totalTuition = verifyingRegistration.totalTuitionIDR || 510000;
-            const monthly = Math.round(totalTuition / 6);
+            const monthly = Math.round(totalTuition / 6) || 85000;
             const paidAmount = paymentAmountInput;
             const paidCount = paymentCountInput;
-            const remainingAmount = Math.max(0, totalTuition - paidAmount);
-            const isFullyPaid = paidCount >= 6 || remainingAmount === 0;
-            const percentPaid = Math.min(100, Math.round((paidAmount / totalTuition) * 100));
+            const extraAmount = Math.max(0, paidAmount - paidCount * monthly);
+            const remainingAmount = Math.max(0, (6 - paidCount) * monthly);
+            const isFullyPaid = paidCount >= 6;
+            const percentPaid = Math.min(100, Math.round((paidCount / 6) * 100));
+            const extraInfoText =
+              extraAmount > 0
+                ? `\n- Uang Tambahan / Infak: *${formatIDR(extraAmount)}* (tidak masuk ke bulan berikutnya)`
+                : '';
 
             const waDigits = verifyingRegistration.whatsapp.replace(/[^0-9]/g, '');
             const formattedWa = waDigits.startsWith('0') ? '62' + waDigits.slice(1) : waDigits;
-            const waNotificationText = `Assalamu'alaikum Warahmatullahi Wabarakatuh, Sdr/i ${verifyingRegistration.fullName} (${verifyingRegistration.registrationNumber}).\n\nAlhamdulillah, pembayaran cicilan belajar Anda untuk program *${verifyingRegistration.selectedProgramName}* telah *DIVERIFIKASI LUNAS* oleh Bagian Keuangan Ma'had Al-Bayan:\n\n- Jumlah Cicilan Lunas: *${paidCount} dari 6 Cicilan*\n- Total Terbayar: *${formatIDR(paidAmount)}*\n- Sisa Tagihan: *${isFullyPaid ? 'LUNAS SEPENUHNYA' : formatIDR(remainingAmount)}*\n- Tanggal Verifikasi: ${paymentDateInput || 'Hari ini'}\n- Rekening Tujuan: ${paymentBankMethod}\n\nData keuangan akun Anda di portal pelajar (pelajar.html) sudah otomatis terupdate. Jazakumullahu khairan.`;
+            const waNotificationText = `Assalamu'alaikum Warahmatullahi Wabarakatuh, Sdr/i ${verifyingRegistration.fullName} (${verifyingRegistration.registrationNumber}).\n\nAlhamdulillah, pembayaran cicilan belajar Anda untuk program *${verifyingRegistration.selectedProgramName}* telah *DIVERIFIKASI LUNAS* oleh Bagian Keuangan Ma'had Al-Bayan:\n\n- Jumlah Cicilan Lunas: *${paidCount} dari 6 Cicilan*\n- Total Terbayar: *${formatIDR(paidAmount)}*${extraInfoText}\n- Sisa Tagihan: *${isFullyPaid ? 'LUNAS SEPENUHNYA' : formatIDR(remainingAmount)}*\n- Tanggal Verifikasi: ${paymentDateInput || 'Hari ini'}\n- Rekening Tujuan: ${paymentBankMethod}\n\nData keuangan akun Anda di portal pelajar (pelajar.html) sudah otomatis terupdate. Jazakumullahu khairan.`;
             const waNotificationUrl = `https://wa.me/${formattedWa}?text=${encodeURIComponent(waNotificationText)}`;
 
             return (
@@ -8383,6 +8494,11 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
                         <span className="text-[10px] text-emerald-700 block mt-0.5 font-medium">
                           {paidCount} dari 6 Cicilan
                         </span>
+                        {extraAmount > 0 && (
+                          <span className="inline-block mt-1 px-1.5 py-0.5 rounded bg-sky-100 text-sky-900 border border-sky-200 text-[10px] font-semibold">
+                            + Uang Tambahan {formatIDR(extraAmount)}
+                          </span>
+                        )}
                       </div>
                       <div className={`p-3 rounded-xl border ${
                         isFullyPaid
@@ -8453,6 +8569,71 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
                       </div>
                     </div>
 
+                    {/* Input Tambah Pembayaran Baru (+ Rp ...) */}
+                    <div className="bg-sky-50/80 border border-sky-200 rounded-xl p-4 space-y-3">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div>
+                          <label className="block text-xs font-bold text-slate-900">
+                            Tambah Uang Tambahan (+ Rp ...)
+                          </label>
+                          <p className="text-[11px] text-slate-600 mt-0.5">
+                            Pilih bulan dan ketik nominal uang tambahan (misal 15.000 atau 85.000), lalu klik <strong>&quot;+ Tambahkan&quot;</strong>. Nominal dicatat khusus sebagai <strong>Uang Tambahan</strong> pada bulan terpilih tanpa otomatis menceklis cicilan bulan pokok.
+                          </p>
+                        </div>
+                        {extraAmount > 0 && (
+                          <span className="text-[11px] font-semibold text-sky-900 bg-sky-100 px-2.5 py-1 rounded-md border border-sky-300">
+                            Uang Tambahan: {formatIDR(extraAmount)}
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="flex flex-col sm:flex-row gap-2">
+                        <select
+                          value={targetPaymentMonth}
+                          onChange={(e) => setTargetPaymentMonth(Number(e.target.value))}
+                          aria-label="Pilih bulan pencatatan uang tambahan"
+                          className="px-3 py-2 text-xs font-bold bg-white border border-sky-300 rounded-lg text-sky-950 focus:outline-none focus:border-sky-700"
+                        >
+                          {[1, 2, 3, 4, 5, 6].map((m) => (
+                            <option key={m} value={m}>
+                              Bulan ke-{m}
+                            </option>
+                          ))}
+                        </select>
+                        <input
+                          type="text"
+                          inputMode="numeric"
+                          value={
+                            customAddPaymentInput
+                              ? Number(customAddPaymentInput).toLocaleString('id-ID')
+                              : ''
+                          }
+                          onChange={(e) => {
+                            const digitsOnly = e.target.value.replace(/\D/g, '');
+                            setCustomAddPaymentInput(digitsOnly ? String(Number(digitsOnly)) : '');
+                          }}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              e.preventDefault();
+                              const num = Number(customAddPaymentInput);
+                              if (num > 0) handleAddPaymentAmount(num);
+                            }
+                          }}
+                          placeholder="Ketik nominal transfer (misal: 100.000 atau 15.000)"
+                          className="flex-1 px-3 py-2 text-xs font-mono font-bold bg-white border border-sky-300 rounded-lg focus:outline-none focus:border-sky-700"
+                        />
+                        <button
+                          type="button"
+                          disabled={!(Number(customAddPaymentInput) > 0)}
+                          onClick={() => handleAddPaymentAmount(Number(customAddPaymentInput))}
+                          className="inline-flex items-center justify-center gap-1.5 px-4 py-2 text-xs font-bold rounded-lg bg-sky-800 text-white hover:bg-sky-900 disabled:opacity-50 disabled:cursor-not-allowed transition-colors shadow-xs whitespace-nowrap"
+                        >
+                          <Plus className="w-3.5 h-3.5" />
+                          <span>+ Tambahkan</span>
+                        </button>
+                      </div>
+                    </div>
+
                     {/* Interactive 6-Month Installment Cards */}
                     <div>
                       <label className="block text-xs font-bold text-slate-900 mb-2">
@@ -8461,29 +8642,56 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
                       <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
                         {[1, 2, 3, 4, 5, 6].map((month) => {
                           const isMonthPaid = month <= paidCount;
+                          const monthExtra = Number(monthlyExtraPaymentsInput[String(month)] || 0);
+                          const displayTotal = isMonthPaid ? monthly + monthExtra : monthly;
                           return (
-                            <button
+                            <div
                               key={month}
-                              type="button"
+                              role="button"
+                              tabIndex={0}
                               onClick={() => handleQuickSetInstallment(month)}
-                              className={`p-2.5 rounded-lg border text-left transition-all ${
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter' || e.key === ' ') {
+                                  e.preventDefault();
+                                  handleQuickSetInstallment(month);
+                                }
+                              }}
+                              className={`p-2.5 rounded-lg border text-left transition-all cursor-pointer ${
                                 isMonthPaid
                                   ? 'bg-emerald-50 border-emerald-300 ring-1 ring-emerald-200 text-emerald-950'
                                   : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100'
                               }`}
                             >
-                              <div className="flex items-center justify-between">
+                              <div className="flex items-center justify-between gap-1">
                                 <span className="font-bold text-xs">Bulan ke-{month}</span>
                                 <span className={`text-[10px] font-mono px-1.5 py-0.2 rounded font-bold ${
-                                  isMonthPaid ? 'bg-emerald-200 text-emerald-900' : 'bg-slate-200 text-slate-600'
+                                  isMonthPaid
+                                    ? 'bg-emerald-200 text-emerald-900'
+                                    : 'bg-slate-200 text-slate-600'
                                 }`}>
                                   {isMonthPaid ? 'Lunas ✓' : 'Belum'}
                                 </span>
                               </div>
                               <div className="text-[11px] font-mono mt-1 font-semibold">
-                                {formatIDR(monthly)}
+                                {formatIDR(displayTotal)}
                               </div>
-                            </button>
+                              {monthExtra > 0 && (
+                                <div className="mt-1.5 flex items-center justify-between gap-1 px-1.5 py-0.5 rounded bg-sky-100 border border-sky-200 text-sky-900 text-[10px] font-semibold">
+                                  <span>+ Kelebihan {formatIDR(monthExtra)}</span>
+                                  <button
+                                    type="button"
+                                    title={`Hapus kelebihan Bulan ke-${month}`}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleRemoveMonthExtra(month);
+                                    }}
+                                    className="text-sky-800 hover:text-rose-700 font-bold px-0.5 leading-none"
+                                  >
+                                    ×
+                                  </button>
+                                </div>
+                              )}
+                            </div>
                           );
                         })}
                       </div>
@@ -8522,7 +8730,6 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
                           onChange={(e) => {
                             const val = Number(e.target.value) || 0;
                             setPaymentAmountInput(val);
-                            setPaymentCountInput(Math.min(6, Math.floor(val / (monthly || 85000))));
                           }}
                           className="w-full px-3 py-2 text-xs font-mono font-bold bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-emerald-800"
                         />

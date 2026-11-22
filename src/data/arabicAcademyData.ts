@@ -70,6 +70,7 @@ export interface RegistrationRecord {
   totalTuitionIDR: number;
   paidTuitionIDR?: number; // Jumlah yang sudah dibayar (IDR)
   installmentPaidCount?: number; // Jumlah cicilan yang sudah lunas (0-6)
+  monthlyExtraPayments?: Record<string, number>; // Uang tambahan/kelebihan per bulan ('1'..'6')
   paymentPlan?: 'lunas' | 'cicilan'; // Skema pembayaran
   lastPaymentDate?: string; // Tanggal pembayaran terakhir
   registeredAt: string;
@@ -324,7 +325,7 @@ export const PROGRAM_TRACKS: ProgramTrack[] = [
       'Mampu menganalisis kalimat majemuk yang memuat Kana, Inna, Maf’ul Bih, Maf’ul Muthlaq, Maf’ul Li Ajlih, Zharaf, Hal, dan Tamyiz.',
     kitabReference: 'Modul Tadribul Lughah Jilid 2 (Nawasikh & Manshubatul Asma’)',
     featuredSpan: false,
-    registrationOpen: true,
+    registrationOpen: false,
     angkatan: 'Angkatan 1',
     startDate: '17 November 2026',
     modules: [
@@ -376,7 +377,7 @@ export const PROGRAM_TRACKS: ProgramTrack[] = [
       'Tuntas menguasai seluruh peta konsep ilmu Nahwu dan terampil meng-i’rab kalimat lengkap pada teks Arab gundul maupun ayat Al-Qur’an.',
     kitabReference: 'Modul Tadribul Lughah Jilid 3 & Matan Al-Ajurrumiyyah Tathbiqi',
     featuredSpan: false,
-    registrationOpen: true,
+    registrationOpen: false,
     angkatan: 'Angkatan 1',
     startDate: '21 November 2026',
     modules: [
@@ -429,7 +430,7 @@ export const PROGRAM_TRACKS: ProgramTrack[] = [
     kitabReference: 'Modul Tadribul Lughah Jilid 4 (Tashrif Istilahi, Lughawi & Amtsilah)',
     image: TURATS_IMAGE_PATH,
     featuredSpan: true,
-    registrationOpen: true,
+    registrationOpen: false,
     angkatan: 'Angkatan 1',
     startDate: '21 November 2026',
     modules: [
@@ -492,7 +493,8 @@ export const CLASS_SCHEDULES: ClassSchedule[] = [
     instructor: 'KH. Luqmanul Hakim, Lc., M.Ag.',
     capacity: 25,
     enrolled: 1,
-    feeIDR: 510000
+    feeIDR: 510000,
+    registrationOpen: false
   },
   {
     id: 'sch-lv3-malam',
@@ -508,7 +510,8 @@ export const CLASS_SCHEDULES: ClassSchedule[] = [
     instructor: 'KH. Luqmanul Hakim, Lc., M.Ag.',
     capacity: 25,
     enrolled: 0,
-    feeIDR: 510000
+    feeIDR: 510000,
+    registrationOpen: false
   },
   {
     id: 'sch-lv4-malam',
@@ -524,7 +527,8 @@ export const CLASS_SCHEDULES: ClassSchedule[] = [
     instructor: 'Syaikh Dr. Ahmad Al-Manshur & Tim Shorof',
     capacity: 25,
     enrolled: 1,
-    feeIDR: 510000
+    feeIDR: 510000,
+    registrationOpen: false
   }
 ];
 
@@ -1314,13 +1318,24 @@ export function applyScheduleStartDateOverrides(
         }
       }
 
-      let resolvedRegOpen = true;
+      let resolvedRegOpen = sch.levelNumber === 1;
       if (typeof ov?.registrationOpen === 'boolean') {
         resolvedRegOpen = ov.registrationOpen;
       } else if (typeof regMap[sch.id] === 'boolean') {
         resolvedRegOpen = regMap[sch.id];
-      } else if (typeof sch.registrationOpen === 'boolean') {
-        resolvedRegOpen = sch.registrationOpen;
+      } else {
+        let matchedFallbackReg: boolean | undefined;
+        for (const key of fallbackKeys) {
+          if (typeof regMap[key] === 'boolean') {
+            matchedFallbackReg = regMap[key];
+            break;
+          }
+        }
+        if (typeof matchedFallbackReg === 'boolean') {
+          resolvedRegOpen = matchedFallbackReg;
+        } else if (typeof sch.registrationOpen === 'boolean') {
+          resolvedRegOpen = sch.registrationOpen;
+        }
       }
 
       return {
