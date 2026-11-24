@@ -158,10 +158,10 @@ export const EnrollmentConfirmModal: React.FC<EnrollmentConfirmModalProps> = ({
               <span className="font-semibold text-slate-900">Biaya Pendidikan</span>
               <div className="text-right">
                 <span className="font-mono font-bold text-emerald-900 text-sm">
-                  {formatIDR(program.tuitionIDR)}
+                  {formatIDR(schedule.feeIDR ?? program.tuitionIDR)}
                 </span>
                 <span className="block text-[11px] font-mono text-slate-500">
-                  Cicilan 6x: {formatIDR(Math.round(program.tuitionIDR / 6))}/bln
+                  Cicilan 6x: {formatIDR(Math.round((schedule.feeIDR ?? program.tuitionIDR) / 6))}/bln
                 </span>
               </div>
             </div>

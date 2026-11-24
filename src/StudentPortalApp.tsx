@@ -583,7 +583,7 @@ export default function StudentPortalApp() {
       learningGoal:
         customGoal?.trim() ||
         `Menguasai kaidah ${programToEnroll.category === 'shorof' ? 'Shorof' : 'Nahwu'} secara sistematis melalui Tadribul Lughah Level ${programToEnroll.levelNumber} (${targetAngkatan}).`,
-      totalTuitionIDR: programToEnroll.tuitionIDR,
+      totalTuitionIDR: chosenSchedule?.feeIDR || programToEnroll.tuitionIDR,
       registeredAt: nowStr,
       status: 'Terverifikasi — Menunggu Orientasi'
     };
@@ -965,10 +965,10 @@ export default function StudentPortalApp() {
                         <span className="font-semibold text-slate-900">Biaya Level</span>
                         <div className="text-right">
                           <span className="font-mono font-bold text-emerald-900 text-sm">
-                            {formatIDR(prog.tuitionIDR)}
+                            {formatIDR(displaySchedule?.feeIDR || prog.tuitionIDR)}
                           </span>
                           <span className="block text-[11px] font-mono text-slate-500">
-                            Cicilan 6x: {formatIDR(Math.round(prog.tuitionIDR / 6))}/bln
+                            Cicilan 6x: {formatIDR(Math.round((displaySchedule?.feeIDR || prog.tuitionIDR) / 6))}/bln
                           </span>
                         </div>
                       </div>
@@ -1032,7 +1032,7 @@ export default function StudentPortalApp() {
                               className="flex-1 inline-flex items-center justify-center gap-2 px-4 py-2.5 text-xs font-semibold text-white bg-emerald-900 hover:bg-emerald-800 rounded-lg transition-colors shadow-xs cursor-pointer"
                             >
                               <span>
-                                Konfirmasi Pendaftaran Level {prog.levelNumber} – {displayAngkatan} ({formatIDR(prog.tuitionIDR)})
+                                Konfirmasi Pendaftaran Level {prog.levelNumber} – {displayAngkatan} ({formatIDR(displaySchedule?.feeIDR || prog.tuitionIDR)})
                               </span>
                               <ArrowRight className="w-3.5 h-3.5" />
                             </button>
@@ -1735,7 +1735,7 @@ export default function StudentPortalApp() {
       learningGoal: isReEnrollment
         ? `Mengulang & memantapkan materi ${newProgram.title} di ${targetAngkatan}.`
         : `Mempelajari ${newProgram.title} (${targetAngkatan}) dengan akun terdaftar.`,
-      totalTuitionIDR: newProgram.tuitionIDR,
+      totalTuitionIDR: matchingSchedule?.feeIDR || newProgram.tuitionIDR,
       registeredAt: nowStr,
       status: 'Terverifikasi — Menunggu Orientasi'
     };
@@ -4187,10 +4187,10 @@ export default function StudentPortalApp() {
                             {(nextAvailableSchedule || preferredSchedule)?.days || prog.scheduleDays} · {(nextAvailableSchedule || preferredSchedule)?.timeWIB || prog.scheduleTime}
                           </p>
                           <p className="text-xs font-mono font-bold text-emerald-900">
-                            {formatIDR(prog.tuitionIDR)} / Level
+                            {formatIDR((nextAvailableSchedule || preferredSchedule)?.feeIDR || prog.tuitionIDR)} / Level
                           </p>
                           <p className="text-[11px] font-mono text-slate-600">
-                            Cicilan 6x: {formatIDR(Math.round(prog.tuitionIDR / 6))}/bln
+                            Cicilan 6x: {formatIDR(Math.round(((nextAvailableSchedule || preferredSchedule)?.feeIDR || prog.tuitionIDR) / 6))}/bln
                           </p>
                         </div>
 

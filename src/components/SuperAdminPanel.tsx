@@ -1481,7 +1481,6 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
         targetOutcome: editingKurikulumProgram.targetOutcome,
         scheduleDays: editingKurikulumProgram.scheduleDays,
         scheduleTime: editingKurikulumProgram.scheduleTime,
-        tuitionIDR: editingKurikulumProgram.tuitionIDR,
         modeLabel: resolvedModeLabel
       };
 
@@ -1490,7 +1489,6 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
       for (const sch of levelSchedules) {
         const syncedSch: ClassSchedule = {
           ...sch,
-          feeIDR: progToSave.tuitionIDR,
           modeLabel: resolvedModeLabel
         };
         saveScheduleOverride(syncedSch);
@@ -2084,9 +2082,9 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
     try {
       const targetProg = programs.find((p) => p.id === assignLevelId) || programs[0];
       const targetSched = schedules.find((s) => s.id === assignScheduleId) || schedules[0];
-      const tuition = targetProg?.tuitionIDR || 510000;
+      const tuition = targetSched?.feeIDR || targetProg?.tuitionIDR || 510000;
       const isLunas = assignPaymentStatus === 'lunas';
-      const targetAngkatan = targetProg?.angkatan || 'Angkatan 1';
+      const targetAngkatan = targetSched?.angkatan || targetProg?.angkatan || 'Angkatan 1';
 
       const nowStr =
         new Intl.DateTimeFormat('id-ID', {
@@ -3831,6 +3829,29 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
                         />
                       </div>
 
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-800 mb-1">
+                          Biaya Pendaftaran Kelas (IDR) — {editingSchedule.angkatan?.trim() || 'Angkatan 1'}
+                        </label>
+                        <input
+                          type="number"
+                          min={0}
+                          step={5000}
+                          required
+                          value={editingSchedule.feeIDR}
+                          onChange={(e) =>
+                            setEditingSchedule({
+                              ...editingSchedule,
+                              feeIDR: Number(e.target.value) || 0
+                            })
+                          }
+                          className="w-full px-3 py-2 text-xs font-mono bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-emerald-800"
+                        />
+                        <p className="text-[11px] text-slate-500 mt-1 font-mono">
+                          Cicilan 6x: {formatIDR(Math.round((editingSchedule.feeIDR || 0) / 6))}/bln · Berlaku khusus untuk {editingSchedule.angkatan?.trim() || 'Angkatan 1'}.
+                        </p>
+                      </div>
+
                       <div className="sm:col-span-2 bg-emerald-50/70 p-4 rounded-xl border border-emerald-300 space-y-3">
                         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1.5">
                           <label className="text-xs font-bold text-emerald-950 flex items-center gap-1.5">
@@ -4896,26 +4917,6 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
                                 setEditingKurikulumProgram({
                                   ...editingKurikulumProgram,
                                   scheduleTime: e.target.value
-                                })
-                              }
-                              className="w-full px-3 py-2 text-xs font-mono bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-emerald-800"
-                            />
-                          </div>
-
-                          <div>
-                            <label className="block text-xs font-semibold text-slate-800 mb-1">
-                              Biaya Pendaftaran Kelas (IDR)
-                            </label>
-                            <input
-                              type="number"
-                              min={10000}
-                              step={5000}
-                              required
-                              value={editingKurikulumProgram.tuitionIDR}
-                              onChange={(e) =>
-                                setEditingKurikulumProgram({
-                                  ...editingKurikulumProgram,
-                                  tuitionIDR: Number(e.target.value) || 0
                                 })
                               }
                               className="w-full px-3 py-2 text-xs font-mono bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-emerald-800"

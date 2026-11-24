@@ -466,7 +466,7 @@ export const RegistrationWorkspace: React.FC<RegistrationWorkspaceProps> = ({
         (isReEnrollment
           ? `Mengulang & memantapkan kaidah di ${targetAngkatan}.`
           : `Menguasai kaidah ${programToEnroll.category === 'shorof' ? 'Shorof' : 'Nahwu'} secara sistematis melalui Tadribul Lughah Level ${programToEnroll.levelNumber} (${targetAngkatan}).`),
-      totalTuitionIDR: programToEnroll.tuitionIDR,
+      totalTuitionIDR: chosenSchedule?.feeIDR || programToEnroll.tuitionIDR,
       paidTuitionIDR: 0,
       installmentPaidCount: 0,
       paymentPlan: 'cicilan',
@@ -1480,10 +1480,10 @@ export const RegistrationWorkspace: React.FC<RegistrationWorkspaceProps> = ({
                               <span className="font-semibold text-slate-900">Biaya Level</span>
                               <div className="text-right">
                                 <span className="font-mono font-bold text-emerald-900 text-sm">
-                                  {formatIDR(prog.tuitionIDR)}
+                                  {formatIDR(displaySchedule?.feeIDR || prog.tuitionIDR)}
                                 </span>
                                 <span className="block text-[11px] font-mono text-slate-500">
-                                  Cicilan 6x: {formatIDR(Math.round(prog.tuitionIDR / 6))}/bln
+                                  Cicilan 6x: {formatIDR(Math.round((displaySchedule?.feeIDR || prog.tuitionIDR) / 6))}/bln
                                 </span>
                               </div>
                             </div>
@@ -1580,8 +1580,8 @@ export const RegistrationWorkspace: React.FC<RegistrationWorkspaceProps> = ({
                                   >
                                     <span>
                                       {isEnrolled
-                                        ? `Konfirmasi Daftar Ulang ${activeScheduleAngkatan} (${formatIDR(prog.tuitionIDR)})`
-                                        : `Konfirmasi Pendaftaran Level ${prog.levelNumber} - ${activeScheduleAngkatan} (${formatIDR(prog.tuitionIDR)})`}
+                                        ? `Konfirmasi Daftar Ulang ${activeScheduleAngkatan} (${formatIDR(displaySchedule?.feeIDR || prog.tuitionIDR)})`
+                                        : `Konfirmasi Pendaftaran Level ${prog.levelNumber} - ${activeScheduleAngkatan} (${formatIDR(displaySchedule?.feeIDR || prog.tuitionIDR)})`}
                                     </span>
                                     <ArrowRight className="w-3.5 h-3.5" />
                                   </button>

@@ -485,7 +485,7 @@ function generateStandaloneCpanelHtml(
         selectedScheduleId: sch.id,
         selectedScheduleSummary: sch.batchCode + ' · ' + sch.days + ' (' + sch.timeWIB + ') · Online',
         learningGoal: 'Menguasai kaidah Nahwu dan Shorof secara sistematis.',
-        totalTuitionIDR: prog.tuitionIDR,
+        totalTuitionIDR: sch.feeIDR || prog.tuitionIDR,
         registeredAt: nowStr,
         status: 'Terverifikasi — Menunggu Orientasi'
       };
@@ -531,7 +531,7 @@ function generateStandaloneCpanelHtml(
         arabicTitle: f.arabicTitle.value,
         scheduleDays: f.scheduleDays.value,
         scheduleTime: f.scheduleTime.value,
-        tuitionIDR: Number(f.tuitionIDR.value) || 510000,
+        tuitionIDR: f.tuitionIDR ? (Number(f.tuitionIDR.value) || 510000) : state.programs[idx].tuitionIDR,
         kitabReference: f.kitabReference.value,
         summary: f.summary.value,
         targetOutcome: f.targetOutcome.value
@@ -1318,7 +1318,7 @@ export function generateStandaloneStudentPortalHtml(
         selectedScheduleId: sch.id,
         selectedScheduleSummary: sch.batchCode + ' · ' + sch.days + ' (' + sch.timeWIB + ') · Online',
         learningGoal: 'Menguasai materi ' + prog.title + ' dengan akun terdaftar.',
-        totalTuitionIDR: prog.tuitionIDR,
+        totalTuitionIDR: sch.feeIDR || prog.tuitionIDR,
         registeredAt: nowStr,
         status: 'Terverifikasi — Menunggu Orientasi'
       };
@@ -2222,7 +2222,7 @@ export function generateStandaloneSuperAdminHtml(
         angkatan: f.angkatan ? f.angkatan.value : (state.programs[idx].angkatan || 'Angkatan 1'),
         scheduleDays: f.scheduleDays.value,
         scheduleTime: f.scheduleTime.value,
-        tuitionIDR: Number(f.tuitionIDR.value) || 510000,
+        tuitionIDR: f.tuitionIDR ? (Number(f.tuitionIDR.value) || 510000) : state.programs[idx].tuitionIDR,
         kitabReference: f.kitabReference.value,
         summary: f.summary.value,
         targetOutcome: f.targetOutcome.value
@@ -2413,10 +2413,6 @@ export function generateStandaloneSuperAdminHtml(
                 <div>
                   <label class="block text-xs font-semibold mb-1">Jam Belajar Malam (WIB)</label>
                   <input name="scheduleTime" value="\${prog.scheduleTime}" class="w-full px-3 py-2 text-xs font-mono border border-slate-300 rounded-lg" />
-                </div>
-                <div>
-                  <label class="block text-xs font-semibold mb-1">Biaya Pendaftaran (IDR)</label>
-                  <input name="tuitionIDR" type="number" value="\${prog.tuitionIDR}" class="w-full px-3 py-2 text-xs font-mono border border-slate-300 rounded-lg" />
                 </div>
                 <div>
                   <label class="block text-xs font-semibold mb-1">Kitab / Modul Pegangan</label>
