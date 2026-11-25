@@ -155,7 +155,9 @@ export default function ModuleReaderApp() {
   // Check if visitor is verified Superadmin (mazharhajid@gmail.com)
   const [isSuperAdmin, setIsSuperAdmin] = useState<boolean>(() => {
     try {
-      const saved = sessionStorage.getItem(SUPERADMIN_SESSION_KEY);
+      const saved =
+        localStorage.getItem(SUPERADMIN_SESSION_KEY) ||
+        sessionStorage.getItem(SUPERADMIN_SESSION_KEY);
       return saved === SUPERADMIN_EMAIL;
     } catch {
       return false;
@@ -261,6 +263,7 @@ export default function ModuleReaderApp() {
       if (user && isUserSuperAdmin(user)) {
         setIsSuperAdmin(true);
         try {
+          localStorage.setItem(SUPERADMIN_SESSION_KEY, SUPERADMIN_EMAIL);
           sessionStorage.setItem(SUPERADMIN_SESSION_KEY, SUPERADMIN_EMAIL);
         } catch {
           // Ignore

@@ -72,8 +72,8 @@ async function deploy() {
     console.log('📄 File .htaccess cPanel otomatis disalin ke dist/');
   }
 
-  // 4b. JANGAN timpa database data live di cPanel (program_states.json, custom_materi.json, quiz_scores.json, registrations.json, pekan_unlock.json, attendance.json, student_accounts.json, attendance_unlock.json, gemini_config.json)
-  const runtimeFilesToPreserve = ['program_states.json', 'custom_materi.json', 'quiz_scores.json', 'registrations.json', 'pekan_unlock.json', 'attendance.json', 'student_accounts.json', 'attendance_unlock.json', 'gemini_config.json'];
+  // 4b. JANGAN timpa database data live di cPanel (program_states.json, custom_materi.json, quiz_scores.json, registrations.json, pekan_unlock.json, attendance.json, student_accounts.json, attendance_unlock.json, gemini_config.json, finance_expenses.json)
+  const runtimeFilesToPreserve = ['program_states.json', 'custom_materi.json', 'quiz_scores.json', 'registrations.json', 'pekan_unlock.json', 'attendance.json', 'student_accounts.json', 'attendance_unlock.json', 'gemini_config.json', 'finance_expenses.json', 'mutolaah_progress.json'];
   for (const file of runtimeFilesToPreserve) {
     const filePath = path.join(distDir, file);
     if (fs.existsSync(filePath)) {

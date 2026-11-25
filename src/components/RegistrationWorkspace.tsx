@@ -20,6 +20,11 @@ import {
   PendingEnrollmentConfirmation
 } from './EnrollmentConfirmModal';
 import {
+  EnrollmentSuccessInfo,
+  EnrollmentSuccessModal
+} from './EnrollmentSuccessModal';
+import { LogoutConfirmModal } from './LogoutConfirmModal';
+import {
   CheckCircle2,
   Download,
   Printer,
@@ -121,6 +126,9 @@ export const RegistrationWorkspace: React.FC<RegistrationWorkspaceProps> = ({
   const [isSubmittingAccount, setIsSubmittingAccount] = useState<boolean>(false);
   const [pendingConfirmEnrollment, setPendingConfirmEnrollment] =
     useState<PendingEnrollmentConfirmation | null>(null);
+  const [enrollmentSuccessModal, setEnrollmentSuccessModal] =
+    useState<EnrollmentSuccessInfo | null>(null);
+  const [showLogoutConfirm, setShowLogoutConfirm] = useState<boolean>(false);
   const [invalidField, setInvalidField] = useState<'fullName' | 'email' | 'whatsapp' | 'city' | 'password' | null>(null);
 
   // Listen for session changes or reload active account
@@ -486,6 +494,14 @@ export const RegistrationWorkspace: React.FC<RegistrationWorkspaceProps> = ({
     onSubmitRegistration(newRecord);
     setPendingConfirmEnrollment(null);
     setSubmittedRecord(newRecord);
+    setEnrollmentSuccessModal({
+      registrationNumber: newRegNo,
+      programTitle: programToEnroll.title,
+      angkatan: targetAngkatan,
+      days: chosenSchedule.days,
+      timeWIB: chosenSchedule.timeWIB,
+      isReEnrollment
+    });
     setSuccessBanner(
       isReEnrollment
         ? `Alhamdulillah! Pendaftaran ulang untuk ${programToEnroll.title} (${targetAngkatan}) berhasil! Nomor Registrasi baru: ${newRegNo}. Seluruh data, nilai, dan riwayat angkatan sebelumnya tetap aman tersimpan di akun Anda.`
@@ -566,14 +582,8 @@ export const RegistrationWorkspace: React.FC<RegistrationWorkspaceProps> = ({
                 href="./pelajar.html"
                 className="inline-flex items-center gap-2 px-4 py-2.5 text-xs font-semibold text-white bg-emerald-900 hover:bg-emerald-800 rounded-lg transition-colors whitespace-nowrap shrink-0 shadow-xs"
               >
-                <span>Portal Pelajar (pelajar.html)</span>
+                <span>Buka Portal Pelajar</span>
                 <ArrowRight className="w-3.5 h-3.5" />
-              </a>
-              <a
-                href="./login.html"
-                className="inline-flex items-center gap-2 px-4 py-2.5 text-xs font-semibold text-slate-700 bg-white border border-slate-300 hover:bg-slate-100 rounded-lg transition-colors whitespace-nowrap shrink-0"
-              >
-                <span>Login Akun</span>
               </a>
             </div>
           </div>
@@ -606,7 +616,7 @@ export const RegistrationWorkspace: React.FC<RegistrationWorkspaceProps> = ({
                     className="inline-flex items-center gap-2 px-4 py-2.5 text-xs font-semibold text-white bg-emerald-900 rounded-lg hover:bg-emerald-800 transition-colors whitespace-nowrap shrink-0"
                   >
                     <GraduationCap className="w-4 h-4" />
-                    <span>Buka Portal Pelajar (pelajar.html)</span>
+                    <span>Buka Portal Pelajar</span>
                   </a>
                   <button
                     type="button"
@@ -754,7 +764,7 @@ export const RegistrationWorkspace: React.FC<RegistrationWorkspaceProps> = ({
                       Informasi Akun Pelajar Anda:
                     </p>
                     <p>
-                      Akun ini dapat digunakan untuk login ke <span className="font-mono text-emerald-900">pelajar.html</span> atau mendaftar level lainnya (Level 1, 2, 3, dan 4) tanpa perlu membuat akun lagi.
+                      Akun ini dapat digunakan untuk masuk ke Portal Pelajar atau mendaftar level lainnya (Level 1, 2, 3, dan 4) tanpa perlu membuat akun lagi.
                     </p>
                   </div>
                 </div>
@@ -1130,7 +1140,7 @@ export const RegistrationWorkspace: React.FC<RegistrationWorkspaceProps> = ({
                               <p className="text-[11px] text-slate-500 mt-1 flex items-center gap-1">
                                 <KeyRound className="w-3 h-3 text-emerald-800 shrink-0" />
                                 <span>
-                                  Digunakan untuk masuk ke akun Anda kapan saja dan mengakses portal belajar (<span className="font-mono">pelajar.html</span>).
+                                  Digunakan untuk masuk ke akun Anda kapan saja dan mengakses Portal Pelajar.
                                 </span>
                               </p>
                             )}
@@ -1195,7 +1205,7 @@ export const RegistrationWorkspace: React.FC<RegistrationWorkspaceProps> = ({
                       </form>
                     ) : (
                       /* Form Masuk Akun yang Sudah Ada */
-                      <form onSubmit={handleLoginAccount} className="space-y-5 max-w-lg">
+                      <form onSubmit={handleLoginAccount} className="space-y-5 max-w-lg mx-auto">
                         <div className="space-y-1">
                           <h3 className="text-base font-semibold text-slate-900">
                             Masuk dengan Akun Pelajar Terdaftar
@@ -1331,11 +1341,11 @@ export const RegistrationWorkspace: React.FC<RegistrationWorkspaceProps> = ({
                         className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-emerald-900 bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 rounded-lg transition-colors whitespace-nowrap"
                       >
                         <GraduationCap className="w-3.5 h-3.5" />
-                        <span>Portal Pelajar (pelajar.html)</span>
+                        <span>Buka Portal Pelajar</span>
                       </a>
                       <button
                         type="button"
-                        onClick={handleSwitchAccount}
+                        onClick={() => setShowLogoutConfirm(true)}
                         className="inline-flex items-center gap-1 px-3 py-2 text-xs font-medium text-slate-600 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors whitespace-nowrap"
                       >
                         Keluar / Ganti Akun
@@ -1369,8 +1379,24 @@ export const RegistrationWorkspace: React.FC<RegistrationWorkspaceProps> = ({
                   </div>
 
                   {/* 4 Program Cards Grid */}
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    {programs.slice(0, 4).map((prog) => {
+                  {(() => {
+                    const visiblePrograms = programs
+                      .slice(0, 4)
+                      .filter(
+                        (prog) =>
+                          isProgramHasAnyOpenSchedule(prog, schedules) ||
+                          enrolledProgramIds.has(prog.id)
+                      );
+                    if (visiblePrograms.length === 0) {
+                      return (
+                        <div className="p-6 rounded-xl border border-slate-200 bg-white text-center text-xs sm:text-sm text-slate-600">
+                          Saat ini belum ada level pembelajaran yang membuka pendaftaran baru. Silakan cek kembali secara berkala.
+                        </div>
+                      );
+                    }
+                    return (
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        {visiblePrograms.map((prog) => {
                       const isEnrolled = enrolledProgramIds.has(prog.id);
                       const matchingReg = accountRegistrations.find(
                         (r) => r.selectedProgramId === prog.id
@@ -1618,7 +1644,7 @@ export const RegistrationWorkspace: React.FC<RegistrationWorkspaceProps> = ({
                                     className="flex-1 inline-flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-semibold text-white bg-emerald-900 hover:bg-emerald-800 rounded-lg transition-colors"
                                   >
                                     <GraduationCap className="w-3.5 h-3.5" />
-                                    <span>Buka di Pelajar.html</span>
+                                    <span>Buka Portal Pelajar</span>
                                   </a>
                                   {nextAvailableSchedule ? (
                                     <button
@@ -1683,7 +1709,9 @@ export const RegistrationWorkspace: React.FC<RegistrationWorkspaceProps> = ({
                         </div>
                       );
                     })}
-                  </div>
+                      </div>
+                    );
+                  })()}
                 </div>
               )}
             </div>
@@ -1691,14 +1719,33 @@ export const RegistrationWorkspace: React.FC<RegistrationWorkspaceProps> = ({
       </div>
 
       {activeAccount && (
-        <EnrollmentConfirmModal
-          pending={pendingConfirmEnrollment}
-          studentName={activeAccount.fullName}
-          studentEmail={activeAccount.email}
-          studentWhatsapp={activeAccount.whatsapp}
-          onCancel={() => setPendingConfirmEnrollment(null)}
-          onConfirm={executeConfirmedEnrollment}
-        />
+        <>
+          <EnrollmentConfirmModal
+            pending={pendingConfirmEnrollment}
+            studentName={activeAccount.fullName}
+            studentEmail={activeAccount.email}
+            studentWhatsapp={activeAccount.whatsapp}
+            onCancel={() => setPendingConfirmEnrollment(null)}
+            onConfirm={executeConfirmedEnrollment}
+          />
+          <EnrollmentSuccessModal
+            success={enrollmentSuccessModal}
+            studentName={activeAccount.fullName}
+            portalHref="./pelajar.html"
+            primaryButtonLabel="Tutup"
+            onClose={() => setEnrollmentSuccessModal(null)}
+          />
+          <LogoutConfirmModal
+            isOpen={showLogoutConfirm}
+            studentName={activeAccount.fullName}
+            confirmLabel="Ya, Keluar / Ganti Akun"
+            onCancel={() => setShowLogoutConfirm(false)}
+            onConfirm={() => {
+              setShowLogoutConfirm(false);
+              handleSwitchAccount();
+            }}
+          />
+        </>
       )}
     </section>
   );

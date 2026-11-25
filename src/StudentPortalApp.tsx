@@ -54,6 +54,11 @@ import {
   PendingEnrollmentConfirmation
 } from './components/EnrollmentConfirmModal';
 import {
+  EnrollmentSuccessInfo,
+  EnrollmentSuccessModal
+} from './components/EnrollmentSuccessModal';
+import { LogoutConfirmModal } from './components/LogoutConfirmModal';
+import {
   db,
   auth,
   doc,
@@ -172,6 +177,10 @@ export default function StudentPortalApp() {
     (PendingEnrollmentConfirmation & { mode: 'direct' | 'additional' }) | null
   >(null);
   const [isConfirmingEnrollModal, setIsConfirmingEnrollModal] = useState<boolean>(false);
+  const [enrollmentSuccessModal, setEnrollmentSuccessModal] =
+    useState<EnrollmentSuccessInfo | null>(null);
+  const [showLogoutConfirm, setShowLogoutConfirm] = useState<boolean>(false);
+  const [isLoggingOut, setIsLoggingOut] = useState<boolean>(false);
   const [activeEnrolledProgramId, setActiveEnrolledProgramId] = useState<string>('');
   const [activeRegistrationNumber, setActiveRegistrationNumber] = useState<string>('');
   const [openedModuleIndex, setOpenedModuleIndex] = useState<number | null>(null);
@@ -514,7 +523,12 @@ export default function StudentPortalApp() {
     }
   }, [resolvedEnrolledProgramIdForHook, attendanceUnlockVersion]);
 
+  const requestLogoutStudent = () => {
+    setShowLogoutConfirm(true);
+  };
+
   const handleLogoutStudent = async () => {
+    setIsLoggingOut(true);
     clearActiveStudentSession();
     try {
       await signOut(auth);
@@ -624,6 +638,13 @@ export default function StudentPortalApp() {
     setStudentRegistration(newRecord);
     setActiveRegistrationNumber(newRegNo);
     setActiveEnrolledProgramId(programToEnroll.id);
+    setEnrollmentSuccessModal({
+      registrationNumber: newRegNo,
+      programTitle: programToEnroll.title,
+      angkatan: targetAngkatan,
+      days: chosenSchedule.days,
+      timeWIB: chosenSchedule.timeWIB
+    });
     setToastMsg(`Alhamdulillah! Anda telah resmi memilih ${programToEnroll.title}. Silabus materi dan jadwal telah dibuka.`);
     setTimeout(() => setToastMsg(null), 4000);
     } finally {
@@ -814,7 +835,7 @@ export default function StudentPortalApp() {
               </div>
               <button
                 type="button"
-                onClick={handleLogoutStudent}
+                onClick={requestLogoutStudent}
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-rose-700 hover:text-rose-800 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-lg transition-colors"
               >
                 <LogOut className="w-3.5 h-3.5" />
@@ -876,8 +897,20 @@ export default function StudentPortalApp() {
               </a>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              {programs.slice(0, 4).map((prog) => {
+            {(() => {
+              const openPrograms = programs
+                .slice(0, 4)
+                .filter((prog) => isProgramHasAnyOpenSchedule(prog, schedules));
+              if (openPrograms.length === 0) {
+                return (
+                  <div className="p-6 rounded-xl border border-slate-200 bg-white text-center text-xs sm:text-sm text-slate-600">
+                    Saat ini belum ada level pembelajaran yang membuka pendaftaran baru. Silakan cek kembali secara berkala.
+                  </div>
+                );
+              }
+              return (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  {openPrograms.map((prog) => {
                 const progSchedules = schedules.filter((s) => s.programId === prog.id);
                 const openProgSchedules = progSchedules.filter((s) =>
                   isScheduleRegistrationOpen(s, prog)
@@ -1065,7 +1098,9 @@ export default function StudentPortalApp() {
                   </div>
                 );
               })}
-            </div>
+                </div>
+              );
+            })()}
           </div>
         </main>
 
@@ -1077,6 +1112,19 @@ export default function StudentPortalApp() {
           isSubmitting={isConfirmingEnrollModal}
           onCancel={() => setPendingEnrollVerify(null)}
           onConfirm={handleExecuteVerifiedEnrollment}
+        />
+        <EnrollmentSuccessModal
+          success={enrollmentSuccessModal}
+          studentName={studentAccount.fullName}
+          primaryButtonLabel="Mulai Belajar Sekarang"
+          onClose={() => setEnrollmentSuccessModal(null)}
+        />
+        <LogoutConfirmModal
+          isOpen={showLogoutConfirm}
+          studentName={studentAccount.fullName}
+          isLoading={isLoggingOut}
+          onCancel={() => setShowLogoutConfirm(false)}
+          onConfirm={handleLogoutStudent}
         />
       </div>
     );
@@ -1774,6 +1822,14 @@ export default function StudentPortalApp() {
     setActiveRegistrationNumber(newRegNo);
     setActiveEnrolledProgramId(newProgram.id);
     setStudentRegistration(newReg);
+    setEnrollmentSuccessModal({
+      registrationNumber: newRegNo,
+      programTitle: newProgram.title,
+      angkatan: targetAngkatan,
+      days: matchingSchedule.days,
+      timeWIB: matchingSchedule.timeWIB,
+      isReEnrollment: Boolean(isReEnrollment)
+    });
     setUpgradeBanner(
       isReEnrollment
         ? `Alhamdulillah! Pendaftaran ulang ${newProgram.title} (${targetAngkatan}) berhasil ditambahkan ke akun Anda! Nomor Registrasi baru: ${newRegNo}. Seluruh riwayat dan kelulusan angkatan sebelumnya tetap aman tersimpan di akun Anda.`
@@ -2142,7 +2198,7 @@ export default function StudentPortalApp() {
             <div className="p-3 bg-slate-50 border-t border-slate-200 space-y-2">
               <button
                 type="button"
-                onClick={handleLogoutStudent}
+                onClick={requestLogoutStudent}
                 className="w-full inline-flex items-center justify-center gap-2 px-3.5 py-2 text-xs font-semibold text-white bg-rose-700 hover:bg-rose-800 rounded-xl transition-colors cursor-pointer shadow-2xs"
               >
                 <LogOut className="w-3.5 h-3.5" />
@@ -4131,7 +4187,14 @@ export default function StudentPortalApp() {
                 )}
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                  {programs.map((prog) => {
+                  {programs
+                    .filter(
+                      (prog) =>
+                        prog.id === activeEnrolledProgramId ||
+                        enrolledRegistrations.some((r) => r.selectedProgramId === prog.id) ||
+                        isProgramHasAnyOpenSchedule(prog, schedules)
+                    )
+                    .map((prog) => {
                     const isCurrent = prog.id === activeEnrolledProgramId;
                     const progRegs = enrolledRegistrations.filter(
                       (r) => r.selectedProgramId === prog.id
@@ -4866,7 +4929,7 @@ export default function StudentPortalApp() {
             </a>
             <button
               type="button"
-              onClick={handleLogoutStudent}
+              onClick={requestLogoutStudent}
               className="text-rose-400 hover:text-rose-300 font-medium"
             >
               Keluar Akun Pelajar
@@ -4883,6 +4946,19 @@ export default function StudentPortalApp() {
         isSubmitting={isConfirmingEnrollModal}
         onCancel={() => setPendingEnrollVerify(null)}
         onConfirm={handleExecuteVerifiedEnrollment}
+      />
+      <EnrollmentSuccessModal
+        success={enrollmentSuccessModal}
+        studentName={studentAccount.fullName}
+        primaryButtonLabel="Mulai Belajar Sekarang"
+        onClose={() => setEnrollmentSuccessModal(null)}
+      />
+      <LogoutConfirmModal
+        isOpen={showLogoutConfirm}
+        studentName={studentAccount.fullName}
+        isLoading={isLoggingOut}
+        onCancel={() => setShowLogoutConfirm(false)}
+        onConfirm={handleLogoutStudent}
       />
     </div>
   );

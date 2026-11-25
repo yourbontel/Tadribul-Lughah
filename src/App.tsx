@@ -30,12 +30,6 @@ import { RegistrationWorkspace } from './components/RegistrationWorkspace';
 import { SuperAdminPanel } from './components/SuperAdminPanel';
 import { CpanelDbConfig } from './utils/cpanelSqlGenerator';
 import {
-  generateStandaloneLoginHtml,
-  generateStandaloneStudentPortalHtml,
-  generateStandaloneMateriHtml,
-  generateStandaloneSuperAdminHtml
-} from './utils/cpanelZipBuilder';
-import {
   cleanupStudentAccountAfterRegistrationDelete,
   fetchServerRegistrations
 } from './utils/studentAccountStore';
@@ -584,7 +578,13 @@ export default function App() {
     programCategoryFilter === 'all' ? true : p.category === programCategoryFilter
   );
 
-  const filteredSchedules = schedules
+  const openSchedules = schedules
+    .filter((s) =>
+      isScheduleRegistrationOpen(
+        s,
+        programs.find((p) => p.id === s.programId)
+      )
+    )
     .map((s) => {
       const realCount = activeRegistrations.filter(
         (r) =>
@@ -593,13 +593,14 @@ export default function App() {
           (!r.selectedScheduleId && r.selectedProgramId === s.programId)
       ).length;
       return { ...s, enrolled: realCount };
-    })
-    .filter((s) => {
-      if (scheduleLevelFilter === 'all') return true;
-      if (scheduleLevelFilter === 'lv1') return s.levelNumber === 1;
-      if (scheduleLevelFilter === 'lv2') return s.levelNumber === 2;
-      return s.levelNumber === 3 || s.levelNumber === 4;
     });
+
+  const filteredSchedules = openSchedules.filter((s) => {
+    if (scheduleLevelFilter === 'all') return true;
+    if (scheduleLevelFilter === 'lv1') return s.levelNumber === 1;
+    if (scheduleLevelFilter === 'lv2') return s.levelNumber === 2;
+    return s.levelNumber === 3 || s.levelNumber === 4;
+  });
 
   const primaryProgramTuition = programs[0]?.tuitionIDR || 85000;
 
@@ -614,7 +615,7 @@ export default function App() {
     <div className="min-h-screen flex flex-col bg-[#F8FAFC] text-slate-900">
       {/* Top Bar Contract: Strictly 1 row, 3 zones separated by gap-8 */}
       <header className="sticky top-0 z-30 bg-white/95 backdrop-blur-xs border-b border-slate-200">
-        <div className="max-w-[1200px] mx-auto px-6 py-4 flex items-center justify-between gap-8">
+        <div className="max-w-[1200px] mx-auto px-4 sm:px-6 py-3.5 sm:py-4 flex flex-wrap items-center justify-between gap-3 sm:gap-8">
           {/* Zone 1: Single text element wordmark */}
           <a
             href="#/beranda"
@@ -655,12 +656,19 @@ export default function App() {
             })}
           </nav>
 
-          {/* Zone 3: 1 primary action */}
-          <div className="flex items-center gap-3 shrink-0">
+          {/* Zone 3: Primary actions */}
+          <div className="flex items-center gap-2 sm:gap-2.5 shrink-0">
+            <a
+              href={isSuperAdmin ? '/superadmin.html' : '/login.html'}
+              className="inline-flex items-center gap-1.5 px-3 sm:px-3.5 py-2 text-xs font-semibold rounded-lg border bg-emerald-50 text-emerald-900 border-emerald-200 hover:bg-emerald-100 transition-colors whitespace-nowrap shrink-0"
+            >
+              <ShieldCheck className="w-3.5 h-3.5" />
+              <span>{isSuperAdmin ? 'Panel Superadmin' : 'Login Akun'}</span>
+            </a>
             <button
               type="button"
               onClick={() => navigateToPage('pendaftaran')}
-              className="px-4 py-2 text-xs font-semibold text-white bg-emerald-900 rounded-lg hover:bg-emerald-800 transition-colors whitespace-nowrap shrink-0"
+              className="px-3.5 sm:px-4 py-2 text-xs font-semibold text-white bg-emerald-900 rounded-lg hover:bg-emerald-800 transition-colors whitespace-nowrap shrink-0"
             >
               Daftar Program
             </button>
@@ -668,9 +676,13 @@ export default function App() {
         </div>
       </header>
 
-      {/* Sub-Header Mobile Page Switcher + Active Page Breadcrumb & Superadmin Bar */}
-      <div className="bg-white border-b border-slate-200">
-        <div className="max-w-[1200px] mx-auto px-6 py-2.5 flex flex-wrap items-center justify-between gap-3">
+      {/* Sub-Header Mobile Page Switcher + Active Page Breadcrumb (hidden on desktop Beranda) */}
+      <div
+        className={`bg-white border-b border-slate-200 ${
+          activePage === 'beranda' ? 'md:hidden' : ''
+        }`}
+      >
+        <div className="max-w-[1200px] mx-auto px-4 sm:px-6 py-2.5 flex flex-wrap items-center justify-between gap-3">
           {/* Mobile Horizontal Page Links (visible on small viewports) */}
           <div className="flex md:hidden items-center gap-1 overflow-x-auto py-1">
             {navItems.map((item) => (
@@ -687,18 +699,6 @@ export default function App() {
                 {item.label}
               </button>
             ))}
-            <a
-              href="/pelajar.html"
-              className="px-2.5 py-1 text-xs font-semibold rounded-md whitespace-nowrap shrink-0 text-white bg-emerald-900 hover:bg-emerald-800"
-            >
-              Portal Pelajar
-            </a>
-            <a
-              href="/login.html"
-              className="px-2.5 py-1 text-xs font-semibold rounded-md whitespace-nowrap shrink-0 text-emerald-900 bg-emerald-50 hover:bg-emerald-100"
-            >
-              Login Akun
-            </a>
           </div>
 
           {/* Desktop Page Context Indicator */}
@@ -716,27 +716,6 @@ export default function App() {
               {activePage === 'superadmin' &&
                 'Halaman Khusus Superadmin & Database SQL cPanel'}
             </span>
-          </div>
-
-          {/* Dedicated Superadmin Page Trigger & Student Portal */}
-          <div className="flex flex-wrap items-center gap-2 ml-auto">
-            <a
-              href="/pelajar.html"
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-md bg-emerald-900 text-white hover:bg-emerald-800 transition-colors whitespace-nowrap shrink-0"
-            >
-              <BookOpen className="w-3.5 h-3.5" />
-              <span>Halaman Pelajar (pelajar.html)</span>
-            </a>
-
-            <a
-              href={isSuperAdmin ? '/superadmin.html' : '/login.html'}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-md border bg-emerald-50 text-emerald-900 border-emerald-200 hover:bg-emerald-100 transition-colors whitespace-nowrap shrink-0"
-            >
-              <ShieldCheck className="w-3.5 h-3.5" />
-              {isSuperAdmin
-                ? 'Panel Superadmin (superadmin.html)'
-                : 'Login Akun (login.html)'}
-            </a>
           </div>
         </div>
       </div>
@@ -1003,73 +982,34 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* Dedicated Separate Files login.html, pelajar.html, & superadmin.html Banner Card */}
-                <div className="mt-6 bg-slate-900 text-white border border-slate-800 rounded-xl p-6 flex flex-col md:flex-row md:items-center justify-between gap-6">
+                {/* Portal Peserta Banner Card */}
+                <div className="mt-6 bg-slate-900 text-white border border-slate-800 rounded-xl p-6 sm:p-8 flex flex-col md:flex-row md:items-center justify-between gap-6">
                   <div className="space-y-1.5">
                     <div className="flex items-center gap-2 text-xs font-mono text-emerald-400">
                       <ShieldCheck className="w-4 h-4 shrink-0" />
-                      <span>05. FILE TERPISAH: PELAJAR TERDAFTAR (pelajar.html) · LOGIN (login.html) · SUPERADMIN (superadmin.html)</span>
+                      <span>04. PORTAL PESERTA</span>
                     </div>
-                    <h3 className="text-lg font-semibold text-white">
-                      Halaman Khusus Pelajar Terdaftar (<span className="font-mono text-emerald-300">pelajar.html</span>) & Gerbang Login (<span className="font-mono text-emerald-300">login.html</span>)
+                    <h3 className="text-lg sm:text-xl font-semibold text-white">
+                      Sudah Terdaftar sebagai Peserta Tadribul Lughah?
                     </h3>
-                    <p className="text-xs text-slate-300 max-w-2xl leading-relaxed">
-                      Pelajar yang sudah mendaftar dan memiliki akun dapat masuk ke halaman khusus <span className="font-mono text-emerald-300">pelajar.html</span>. Jika Superadmin (<span className="font-mono text-emerald-300">mazharhajid@gmail.com</span>) yang login di <span className="font-mono text-emerald-300">login.html</span>, sistem langsung mengarahkan ke <span className="font-mono text-emerald-300">superadmin.html</span>.
+                    <p className="text-xs sm:text-sm text-slate-300 max-w-2xl leading-relaxed">
+                      Masuk ke akun Anda untuk melihat jadwal kelas malam, mengunduh modul PDF, mengakses rekaman pembelajaran, serta mengikuti evaluasi dan absensi.
                     </p>
                   </div>
 
-                  <div className="flex flex-wrap items-center gap-2.5 shrink-0">
+                  <div className="flex flex-wrap items-center gap-3 shrink-0">
                     <button
                       type="button"
-                      onClick={() => {
-                        const htmlContent = generateStandaloneStudentPortalHtml(
-                          programs,
-                          schedules,
-                          activeRegistrations
-                        );
-                        const blob = new Blob([htmlContent], {
-                          type: 'text/html;charset=utf-8'
-                        });
-                        const url = URL.createObjectURL(blob);
-                        const a = document.createElement('a');
-                        a.href = url;
-                        a.download = 'pelajar.html';
-                        document.body.appendChild(a);
-                        a.click();
-                        document.body.removeChild(a);
-                        URL.revokeObjectURL(url);
-                      }}
-                      className="inline-flex items-center justify-center gap-2 px-3.5 py-2.5 text-xs font-semibold text-slate-100 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-lg transition-colors whitespace-nowrap shrink-0"
+                      onClick={() => navigateToPage('pendaftaran')}
+                      className="inline-flex items-center justify-center gap-2 px-4 py-2.5 text-xs font-semibold text-slate-200 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-lg transition-colors whitespace-nowrap shrink-0"
                     >
-                      <span>Unduh pelajar.html</span>
+                      <span>Daftar Program</span>
                     </button>
-
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const htmlContent = generateStandaloneLoginHtml();
-                        const blob = new Blob([htmlContent], {
-                          type: 'text/html;charset=utf-8'
-                        });
-                        const url = URL.createObjectURL(blob);
-                        const a = document.createElement('a');
-                        a.href = url;
-                        a.download = 'login.html';
-                        document.body.appendChild(a);
-                        a.click();
-                        document.body.removeChild(a);
-                        URL.revokeObjectURL(url);
-                      }}
-                      className="inline-flex items-center justify-center gap-2 px-3.5 py-2.5 text-xs font-semibold text-slate-100 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-lg transition-colors whitespace-nowrap shrink-0"
-                    >
-                      <span>Unduh login.html</span>
-                    </button>
-
                     <a
-                      href="/pelajar.html"
-                      className="inline-flex items-center justify-center gap-2 px-4 py-2.5 text-xs font-semibold text-white bg-emerald-800 hover:bg-emerald-700 rounded-lg transition-colors whitespace-nowrap shrink-0"
+                      href={isSuperAdmin ? '/superadmin.html' : '/login.html'}
+                      className="inline-flex items-center justify-center gap-2 px-5 py-2.5 text-xs font-semibold text-white bg-emerald-700 hover:bg-emerald-600 rounded-lg transition-colors whitespace-nowrap shrink-0"
                     >
-                      <span>Buka Portal Pelajar (pelajar.html)</span>
+                      <span>{isSuperAdmin ? 'Panel Superadmin' : 'Login Akun'}</span>
                       <ArrowRight className="w-3.5 h-3.5" />
                     </a>
                   </div>
@@ -1337,25 +1277,9 @@ export default function App() {
                       </div>
 
                       {/* Card Footer: Price + Select CTA */}
-                      <div
-                        className={`px-6 sm:px-8 py-4 ${
-                          index === 0
-                            ? 'bg-[#EEF4FA] border-t border-[#D6E4F0]'
-                            : index === 1
-                              ? 'bg-[#EDF7F2] border-t border-[#CDE6DA]'
-                              : index === 2
-                                ? 'bg-[#FDF2F2] border-t border-[#F2D5D5]'
-                                : index === 3
-                                  ? 'bg-[#FEFBEB] border-t border-[#F3E5AB]'
-                                  : 'bg-slate-50 border-t border-slate-200'
-                        } flex flex-wrap items-center justify-between gap-4`}
-                      >
+                      <div className="px-6 sm:px-8 py-4 bg-slate-50 border-t border-slate-200 flex flex-wrap items-center justify-between gap-4">
                         <div>
-                          <span
-                            className={`text-xs block ${
-                              index <= 3 ? 'text-slate-600' : 'text-slate-500'
-                            }`}
-                          >
+                          <span className="text-xs block text-slate-500">
                             Informasi Biaya Pendidikan
                           </span>
                           <span className="text-xs font-semibold text-emerald-950 mt-1 block">
@@ -1429,13 +1353,17 @@ export default function App() {
                     <strong>
                       Online Live via Zoom pada pukul 20.00 – 22.00 WIB
                     </strong>
-                    . Level 1 setiap hari{' '}
+                    . Level 1 setiap{' '}
                     <strong>
                       {programs[0]?.scheduleDays || 'Kamis & Jumat'}
                     </strong>
-                    , dan Level 2 setiap hari{' '}
+                    , Level 2 setiap{' '}
                     <strong>
                       {programs[1]?.scheduleDays || 'Selasa & Rabu'}
+                    </strong>
+                    , serta Level 3 &amp; 4 setiap{' '}
+                    <strong>
+                      {programs[2]?.scheduleDays || 'Sabtu & Ahad'}
                     </strong>
                     .
                   </p>
@@ -1445,10 +1373,10 @@ export default function App() {
                 <div
                   role="tablist"
                   aria-label="Filter jadwal berdasarkan level"
-                  className="flex flex-wrap items-center gap-1 p-1 bg-slate-100 rounded-lg border border-slate-200 self-start lg:self-auto"
+                  className="inline-flex flex-nowrap items-center gap-1 p-1 bg-slate-100 rounded-lg border border-slate-200 self-start lg:self-auto shrink-0 max-w-full overflow-x-auto"
                 >
                   {[
-                    { id: 'all', label: `Semua Jadwal (${schedules.length})` },
+                    { id: 'all', label: `Semua Jadwal (${openSchedules.length})` },
                     { id: 'lv1', label: 'Level 1' },
                     { id: 'lv2', label: 'Level 2' },
                     { id: 'lv3-4', label: 'Level 3 & 4' }
@@ -1491,7 +1419,17 @@ export default function App() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-200 text-xs bg-white">
-                    {filteredSchedules.map((sch) => {
+                    {filteredSchedules.length === 0 ? (
+                      <tr>
+                        <td
+                          colSpan={6}
+                          className="py-10 px-6 text-center text-xs text-slate-500"
+                        >
+                          Belum ada jadwal kelas dengan pendaftaran terbuka pada kategori ini.
+                        </td>
+                      </tr>
+                    ) : (
+                      filteredSchedules.map((sch) => {
                       const remainingSeats = Math.max(
                         0,
                         sch.capacity - sch.enrolled
@@ -1573,7 +1511,8 @@ export default function App() {
                           </td>
                         </tr>
                       );
-                    })}
+                      })
+                    )}
                   </tbody>
                 </table>
               </div>
@@ -1762,7 +1701,7 @@ export default function App() {
                     className="inline-flex items-center gap-1.5 font-medium text-emerald-400 hover:text-emerald-300 transition-colors"
                   >
                     <BookOpen className="w-3.5 h-3.5" />
-                    Halaman Pelajar Terdaftar (pelajar.html)
+                    Portal Pelajar
                   </a>
                 </li>
                 <li>
@@ -1771,7 +1710,7 @@ export default function App() {
                     className="inline-flex items-center gap-1.5 font-medium text-emerald-400 hover:text-emerald-300 transition-colors"
                   >
                     <ShieldCheck className="w-3.5 h-3.5" />
-                    Halaman Login Akun (login.html)
+                    Login Akun
                   </a>
                 </li>
               </ul>

@@ -22,6 +22,7 @@ export default defineConfig(() => {
           materi: path.resolve(__dirname, 'materi.html'),
           latihan: path.resolve(__dirname, 'latihan.html'),
           ujian: path.resolve(__dirname, 'ujian.html'),
+          mutolaah: path.resolve(__dirname, 'mutolaah.html'),
         },
       },
     },

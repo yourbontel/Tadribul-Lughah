@@ -27,6 +27,10 @@ if ($entity === 'program_states' || $entity === 'programs') {
     $storageFile = __DIR__ . '/attendance_unlock.json';
 } elseif ($entity === 'student_accounts' || $entity === 'accounts' || $entity === 'users') {
     $storageFile = __DIR__ . '/student_accounts.json';
+} elseif ($entity === 'finance_expenses' || $entity === 'expenses' || $entity === 'pengeluaran') {
+    $storageFile = __DIR__ . '/finance_expenses.json';
+} elseif ($entity === 'mutolaah_progress' || $entity === 'mutolaah') {
+    $storageFile = __DIR__ . '/mutolaah_progress.json';
 } else {
     $storageFile = __DIR__ . '/custom_materi.json';
 }
@@ -334,6 +338,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' || $_SERVER['REQUEST_METHOD'] === 'DEL
                     $existing[strtoupper(trim($item['registrationNumber']))] = $item;
                 } elseif (is_array($item) && isset($item['email'])) {
                     $existing[strtolower(trim($item['email']))] = $item;
+                } else {
+                    $existing[$k] = $item;
+                }
+            }
+        }
+        $merged = $existing;
+    } elseif ($entity === 'finance_expenses' || $entity === 'expenses' || $entity === 'pengeluaran') {
+        if (isset($data['id'])) {
+            $existing[$data['id']] = $data;
+        } else {
+            foreach ($data as $k => $item) {
+                if (is_array($item) && isset($item['id'])) {
+                    $existing[$item['id']] = $item;
                 } else {
                     $existing[$k] = $item;
                 }

@@ -13,7 +13,7 @@ import {
   ProgramOnlineMeeting,
   isScheduleRegistrationOpen
 } from '../data/arabicAcademyData';
-import { User, SUPERADMIN_EMAIL } from '../firebase';
+import { User } from '../firebase';
 import {
   CpanelDbConfig,
   generateCpanelSqlDump,
@@ -27,7 +27,6 @@ import {
 } from '../utils/cpanelZipBuilder';
 import {
   ShieldCheck,
-  LogIn,
   LogOut,
   Save,
   RotateCcw,
@@ -36,6 +35,8 @@ import {
   ArrowLeft,
   ArrowUp,
   ArrowDown,
+  ChevronDown,
+  ChevronUp,
   CheckCircle2,
   AlertCircle,
   BookOpen,
@@ -141,6 +142,8 @@ interface SuperAdminPanelProps {
   cpanelConfig: CpanelDbConfig;
   onSaveCpanelConfig: (config: CpanelDbConfig) => void;
   pageMode?: 'panel' | 'edit-jadwal';
+  isNavHidden?: boolean;
+  onToggleNavHidden?: () => void;
 }
 
 export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
@@ -163,7 +166,9 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
   onSeedDefaults,
   cpanelConfig,
   onSaveCpanelConfig,
-  pageMode = 'panel'
+  pageMode = 'panel',
+  isNavHidden: isNavHiddenProp,
+  onToggleNavHidden
 }) => {
   const [activeTab, setActiveTab] = useState<
     'schedules' | 'kurikulum' | 'registrations' | 'keuangan' | 'materi' | 'cpanel-sql'
@@ -182,6 +187,36 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
     }
     return 'schedules';
   });
+
+  const SUPERADMIN_NAV_HIDDEN_STORAGE_KEY = 'tl_superadmin_nav_hidden_v1';
+
+  const [internalIsNavHidden, setInternalIsNavHidden] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false;
+    try {
+      return window.localStorage.getItem(SUPERADMIN_NAV_HIDDEN_STORAGE_KEY) === 'true';
+    } catch {
+      return false;
+    }
+  });
+
+  const isNavHidden = isNavHiddenProp !== undefined ? isNavHiddenProp : internalIsNavHidden;
+
+  const handleToggleNavHidden = () => {
+    if (onToggleNavHidden) {
+      onToggleNavHidden();
+    } else {
+      setInternalIsNavHidden((prev) => !prev);
+    }
+  };
+
+  useEffect(() => {
+    if (isNavHiddenProp !== undefined || typeof window === 'undefined') return;
+    try {
+      window.localStorage.setItem(SUPERADMIN_NAV_HIDDEN_STORAGE_KEY, String(internalIsNavHidden));
+    } catch {
+      // Ignore storage errors
+    }
+  }, [internalIsNavHidden, isNavHiddenProp]);
 
   const [selectedMateriProgramId, setSelectedMateriProgramId] = useState<string>(() => {
     try {
@@ -256,6 +291,7 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
   );
   const [isScheduleEditModalOpen, setIsScheduleEditModalOpen] =
     useState<boolean>(false);
+  const [expandedSchedulePills, setExpandedSchedulePills] = useState<Record<string, boolean>>({});
   const [isDeleteScheduleConfirmOpen, setIsDeleteScheduleConfirmOpen] =
     useState<boolean>(false);
 
@@ -453,9 +489,265 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
   const [financeStatusFilter, setFinanceStatusFilter] = useState<'all' | 'lunas' | 'cicilan' | 'unpaid'>('all');
   const [financeLevelFilter, setFinanceLevelFilter] = useState<string>('all');
 
-  // Operational Expense & Foundation Allocation State (Google Plus Rp 175.000/bln & Kas Lembaga 20%)
-  const [googleMonthlyFee, setGoogleMonthlyFee] = useState<number>(175000);
-  const [googleMonthsCount, setGoogleMonthsCount] = useState<number>(1);
+  // Operational Expense & Foundation Allocation State (Google Meet / Google Plus / Zoom / Kustom & Kas Lembaga 20%)
+  type ExpenseProviderKey = 'google_plus' | 'zoom' | 'custom';
+  interface FinanceExpenseRecord {
+    id: string;
+    provider: ExpenseProviderKey;
+    serviceName: string;
+    monthlyFeeIDR: number;
+    monthsCount: number;
+    amountIDR: number;
+    date: string; // YYYY-MM-DD
+    notes?: string;
+    createdAt: string;
+  }
+
+  const FINANCE_EXPENSE_STORAGE_KEY = 'tl_superadmin_finance_expense_config_v1';
+  const FINANCE_EXPENSES_LIST_STORAGE_KEY = 'tl_superadmin_finance_expenses_v1';
+
+  const getLocalTodayIso = (): string => {
+    const now = new Date();
+    const y = now.getFullYear();
+    const m = String(now.getMonth() + 1).padStart(2, '0');
+    const d = String(now.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  };
+
+  const formatExpenseDateIndo = (isoDate: string): string => {
+    if (!isoDate) return '-';
+    const parsed = new Date(`${isoDate}T00:00:00`);
+    if (Number.isNaN(parsed.getTime())) return isoDate;
+    return parsed.toLocaleDateString('id-ID', {
+      day: 'numeric',
+      month: 'long',
+      year: 'numeric'
+    });
+  };
+
+  const sortExpensesNewestFirst = (items: FinanceExpenseRecord[]): FinanceExpenseRecord[] =>
+    [...items].sort((a, b) => {
+      const dateCmp = (b.date || '').localeCompare(a.date || '');
+      if (dateCmp !== 0) return dateCmp;
+      return (b.createdAt || '').localeCompare(a.createdAt || '');
+    });
+
+  const [expenseProvider, setExpenseProvider] = useState<ExpenseProviderKey>(() => {
+    try {
+      const raw = localStorage.getItem(FINANCE_EXPENSE_STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed?.provider === 'google_plus' || parsed?.provider === 'zoom' || parsed?.provider === 'custom') {
+          return parsed.provider;
+        }
+      }
+    } catch {}
+    return 'google_plus';
+  });
+
+  const [customExpenseLabel, setCustomExpenseLabel] = useState<string>(() => {
+    try {
+      const raw = localStorage.getItem(FINANCE_EXPENSE_STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (typeof parsed?.customLabel === 'string') return parsed.customLabel;
+      }
+    } catch {}
+    return 'Google Meet + Zoom';
+  });
+
+  const [expenseFeesByProvider, setExpenseFeesByProvider] = useState<Record<ExpenseProviderKey, number>>(() => {
+    const defaults: Record<ExpenseProviderKey, number> = {
+      google_plus: 175000,
+      zoom: 230000,
+      custom: 175000
+    };
+    try {
+      const raw = localStorage.getItem(FINANCE_EXPENSE_STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed?.feesByProvider && typeof parsed.feesByProvider === 'object') {
+          return {
+            google_plus: Math.max(0, Number(parsed.feesByProvider.google_plus) || defaults.google_plus),
+            zoom: Math.max(0, Number(parsed.feesByProvider.zoom) ?? defaults.zoom),
+            custom: Math.max(0, Number(parsed.feesByProvider.custom) ?? defaults.custom)
+          };
+        }
+      }
+    } catch {}
+    return defaults;
+  });
+
+  const [expenseMonthsCount, setExpenseMonthsCount] = useState<number>(() => {
+    try {
+      const raw = localStorage.getItem(FINANCE_EXPENSE_STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (typeof parsed?.monthsCount === 'number' && parsed.monthsCount >= 1) {
+          return Math.min(12, Math.floor(parsed.monthsCount));
+        }
+      }
+    } catch {}
+    return 1;
+  });
+
+  const [expenseDate, setExpenseDate] = useState<string>(getLocalTodayIso);
+  const [expenseNotes, setExpenseNotes] = useState<string>('');
+  const [isSubmittingExpense, setIsSubmittingExpense] = useState<boolean>(false);
+  const [deletingExpenseId, setDeletingExpenseId] = useState<string | null>(null);
+
+  const [financeExpenses, setFinanceExpenses] = useState<FinanceExpenseRecord[]>(() => {
+    try {
+      const raw = localStorage.getItem(FINANCE_EXPENSES_LIST_STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          return sortExpensesNewestFirst(parsed);
+        }
+      }
+    } catch {}
+    return [];
+  });
+
+  useEffect(() => {
+    let active = true;
+    const loadServerExpenses = async () => {
+      try {
+        const res = await fetch(`./api.php?entity=finance_expenses&_t=${Date.now()}`, {
+          cache: 'no-store'
+        });
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!active || !data || typeof data !== 'object') return;
+        const list: FinanceExpenseRecord[] = Object.values(data).filter(
+          (item): item is FinanceExpenseRecord =>
+            Boolean(item && typeof item === 'object' && 'id' in item && 'amountIDR' in item)
+        );
+        const sorted = sortExpensesNewestFirst(list);
+        setFinanceExpenses(sorted);
+        try {
+          localStorage.setItem(FINANCE_EXPENSES_LIST_STORAGE_KEY, JSON.stringify(sorted));
+        } catch {}
+      } catch {
+        // Fallback to localStorage cache
+      }
+    };
+    loadServerExpenses();
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(
+        FINANCE_EXPENSE_STORAGE_KEY,
+        JSON.stringify({
+          provider: expenseProvider,
+          customLabel: customExpenseLabel,
+          feesByProvider: expenseFeesByProvider,
+          monthsCount: expenseMonthsCount
+        })
+      );
+    } catch {}
+  }, [expenseProvider, customExpenseLabel, expenseFeesByProvider, expenseMonthsCount]);
+
+  const activeExpenseShortLabel =
+    expenseProvider === 'google_plus'
+      ? 'Google Meet / Plus'
+      : expenseProvider === 'zoom'
+      ? 'Zoom'
+      : customExpenseLabel.trim() || 'Layanan Kustom';
+
+  const activeMonthlyFee = Math.max(0, Number(expenseFeesByProvider[expenseProvider]) || 0);
+
+  const handleSubmitFinanceExpense = async () => {
+    if (activeMonthlyFee <= 0) {
+      showToast('error', 'Nominal biaya langganan harus lebih dari Rp 0.');
+      return;
+    }
+    if (!expenseDate) {
+      showToast('error', 'Tanggal pembayaran langganan wajib diisi.');
+      return;
+    }
+
+    const totalAmount = Math.max(0, activeMonthlyFee * expenseMonthsCount);
+    const newRecord: FinanceExpenseRecord = {
+      id: `EXP-${Date.now()}`,
+      provider: expenseProvider,
+      serviceName: activeExpenseShortLabel,
+      monthlyFeeIDR: activeMonthlyFee,
+      monthsCount: expenseMonthsCount,
+      amountIDR: totalAmount,
+      date: expenseDate,
+      notes: expenseNotes.trim() || undefined,
+      createdAt: new Date().toISOString()
+    };
+
+    setIsSubmittingExpense(true);
+    const nextList = sortExpensesNewestFirst([newRecord, ...financeExpenses]);
+    setFinanceExpenses(nextList);
+    try {
+      localStorage.setItem(FINANCE_EXPENSES_LIST_STORAGE_KEY, JSON.stringify(nextList));
+    } catch {}
+
+    let syncedToServer = false;
+    try {
+      const res = await fetch('./api.php?entity=finance_expenses', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newRecord)
+      });
+      if (res.ok) {
+        const json = await res.json();
+        syncedToServer = json?.status === 'ok';
+      }
+    } catch {
+      syncedToServer = false;
+    } finally {
+      setIsSubmittingExpense(false);
+    }
+
+    setExpenseNotes('');
+    showToast(
+      syncedToServer ? 'success' : 'error',
+      syncedToServer
+        ? `Data pengeluaran ${newRecord.serviceName} (${formatIDR(newRecord.amountIDR)}) tanggal ${formatExpenseDateIndo(newRecord.date)} berhasil disimpan ke server.`
+        : `Data pengeluaran ${newRecord.serviceName} (${formatIDR(newRecord.amountIDR)}) tersimpan di browser (server api.php belum merespons).`
+    );
+  };
+
+  const handleDeleteFinanceExpense = async (expense: FinanceExpenseRecord) => {
+    setDeletingExpenseId(expense.id);
+    const nextList = financeExpenses.filter((item) => item.id !== expense.id);
+    setFinanceExpenses(nextList);
+    try {
+      localStorage.setItem(FINANCE_EXPENSES_LIST_STORAGE_KEY, JSON.stringify(nextList));
+    } catch {}
+
+    let deletedOnServer = false;
+    try {
+      const res = await fetch(
+        `./api.php?entity=finance_expenses&action=delete&key=${encodeURIComponent(expense.id)}`,
+        { method: 'POST' }
+      );
+      if (res.ok) {
+        const json = await res.json();
+        deletedOnServer = json?.status === 'ok';
+      }
+    } catch {
+      deletedOnServer = false;
+    } finally {
+      setDeletingExpenseId(null);
+    }
+
+    showToast(
+      deletedOnServer ? 'success' : 'error',
+      deletedOnServer
+        ? `Data pengeluaran ${expense.serviceName} (${formatExpenseDateIndo(expense.date)}) telah dihapus.`
+        : `Data pengeluaran dihapus dari tampilan lokal (gagal sinkron hapus ke server).`
+    );
+  };
 
   // Start date state for programs Level 1 - 4
   const [levelStartDates, setLevelStartDates] = useState<Record<string, string>>(() => {
@@ -1465,8 +1757,6 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
     try {
       const latestProg =
         programs.find((p) => p.id === editingKurikulumProgram.id) || editingKurikulumProgram;
-      const resolvedModeLabel =
-        (editingKurikulumProgram.modeLabel || '').trim() || 'Online Live Interaktif (Zoom)';
       const progToSave: ProgramTrack = {
         ...latestProg,
         title: editingKurikulumProgram.title,
@@ -1478,22 +1768,10 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
         kitabReference: editingKurikulumProgram.kitabReference,
         levelRecommendation: editingKurikulumProgram.levelRecommendation,
         summary: editingKurikulumProgram.summary,
-        targetOutcome: editingKurikulumProgram.targetOutcome,
-        scheduleDays: editingKurikulumProgram.scheduleDays,
-        scheduleTime: editingKurikulumProgram.scheduleTime,
-        modeLabel: resolvedModeLabel
+        targetOutcome: editingKurikulumProgram.targetOutcome
       };
 
       await onSaveProgram(progToSave);
-      const levelSchedules = schedules.filter((s) => s.programId === progToSave.id);
-      for (const sch of levelSchedules) {
-        const syncedSch: ClassSchedule = {
-          ...sch,
-          modeLabel: resolvedModeLabel
-        };
-        saveScheduleOverride(syncedSch);
-        await onSaveSchedule(syncedSch);
-      }
 
       setEditingKurikulumProgram(progToSave);
       showToast(
@@ -1587,6 +1865,7 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
         meetingLink: (editingSchedule.meetingLink || '').trim(),
         meetingPlatform: (editingSchedule.meetingPlatform || 'Google Meet').trim(),
         meetingNotes: (editingSchedule.meetingNotes || '').trim(),
+        modeLabel: (editingSchedule.modeLabel || '').trim() || 'Online Live Interaktif (Zoom)',
         angkatan: resolvedAngkatan,
         className: ''
       };
@@ -1624,7 +1903,11 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
 
   const handleOpenEditScheduleModal = (sch: ClassSchedule) => {
     if (pageMode !== 'edit-jadwal') {
-      window.location.href = `./edit-jadwal.html?scheduleId=${encodeURIComponent(sch.id)}`;
+      window.open(
+        `./edit-jadwal.html?scheduleId=${encodeURIComponent(sch.id)}`,
+        '_blank',
+        'noopener,noreferrer'
+      );
       return;
     }
     setSelectedScheduleId(sch.id);
@@ -2312,11 +2595,18 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
       ? Math.round((totalCashCollected / grossPotential) * 100)
       : 0;
 
-    // Deductions & Foundation Allocation (Permintaan User: Google Plus Rp 175.000/bln lalu potong 20% Kas Lembaga)
-    const totalGoogleExpense = Math.max(0, googleMonthlyFee * googleMonthsCount);
-    const netAfterGoogle = Math.max(0, totalCashCollected - totalGoogleExpense);
-    const kasLembaga20Percent = Math.round(netAfterGoogle * 0.20);
-    const sisaKasOperasional80Percent = Math.max(0, netAfterGoogle - kasLembaga20Percent);
+    // Deductions & Foundation Allocation (Gunakan total data pengeluaran tercatat jika sudah disubmit, atau simulasi kalkulator)
+    const submittedExpensesTotal = financeExpenses.reduce(
+      (sum, item) => sum + Math.max(0, Number(item.amountIDR) || 0),
+      0
+    );
+    const hasSubmittedExpenses = financeExpenses.length > 0;
+    const totalServiceExpense = hasSubmittedExpenses
+      ? submittedExpensesTotal
+      : Math.max(0, activeMonthlyFee * expenseMonthsCount);
+    const netAfterService = Math.max(0, totalCashCollected - totalServiceExpense);
+    const kasLembaga20Percent = Math.round(netAfterService * 0.20);
+    const sisaKasOperasional80Percent = Math.max(0, netAfterService - kasLembaga20Percent);
 
     return {
       grossPotential,
@@ -2332,12 +2622,14 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
         bcaTotal,
         cashTotal
       },
-      totalGoogleExpense,
-      netAfterGoogle,
+      totalServiceExpense,
+      submittedExpensesTotal,
+      hasSubmittedExpenses,
+      netAfterService,
       kasLembaga20Percent,
       sisaKasOperasional80Percent,
-      googleMonthlyFee,
-      googleMonthsCount
+      activeMonthlyFee,
+      expenseMonthsCount
     };
   })();
 
@@ -2430,12 +2722,24 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
       '========================================================================',
       `Tanggal Unduh         : ${new Date().toLocaleDateString('id-ID', { dateStyle: 'full' })}`,
       `Total Kas Masuk (SPP) : ${formatIDR(financialStats.totalCashCollected)}`,
-      `Potongan Google Plus  : - ${formatIDR(financialStats.totalGoogleExpense)} (${googleMonthsCount} bulan @ ${formatIDR(googleMonthlyFee)}/bln)`,
-      `Subtotal Setelah Beban: ${formatIDR(financialStats.netAfterGoogle)}`,
+      financialStats.hasSubmittedExpenses
+        ? `Potongan Langganan    : - ${formatIDR(financialStats.totalServiceExpense)} (${financeExpenses.length} transaksi tercatat)`
+        : `Potongan ${activeExpenseShortLabel.padEnd(12, ' ')}: - ${formatIDR(financialStats.totalServiceExpense)} (${expenseMonthsCount} bulan @ ${formatIDR(activeMonthlyFee)}/bln)`,
+      `Subtotal Setelah Beban: ${formatIDR(financialStats.netAfterService)}`,
       `Alokasi Kas Lembaga 20%: ${formatIDR(financialStats.kasLembaga20Percent)} (Dana Kas Yayasan)`,
       `Sisa Kas Bersih 80%   : ${formatIDR(financialStats.sisaKasOperasional80Percent)} (Operasional Kelas & Honor Asatidz)`,
       `Total Piutang Cicilan : ${formatIDR(financialStats.totalReceivables)}`,
       `Santri Terdaftar      : ${registrations.length} orang (${financialStats.fullyPaidCount} Lunas, ${financialStats.installmentPayingCount} Cicil, ${financialStats.zeroPaidCount} Belum Bayar)`,
+      ...(financeExpenses.length > 0
+        ? [
+            '------------------------------------------------------------------------',
+            'RIWAYAT DATA PENGELUARAN LANGGANAN (ZOOM / GOOGLE MEET / LAINNYA):',
+            ...financeExpenses.map(
+              (exp, idx) =>
+                `${idx + 1}. ${formatExpenseDateIndo(exp.date)} | ${exp.serviceName} (${exp.monthsCount} bln @ ${formatIDR(exp.monthlyFeeIDR)}) = ${formatIDR(exp.amountIDR)}${exp.notes ? ` [${exp.notes}]` : ''}`
+            )
+          ]
+        : []),
       '========================================================================',
       ''
     ].join('\r\n');
@@ -2492,61 +2796,61 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
   return (
     <section
       aria-labelledby="superadmin-page-title"
-      className={pageMode === 'edit-jadwal' ? 'py-6 sm:py-8 bg-[#F8FAFC] min-h-[calc(100vh-80px)]' : 'py-10 sm:py-14 bg-[#F8FAFC] min-h-[calc(100vh-140px)]'}
+      className={pageMode === 'edit-jadwal' ? 'py-6 sm:py-8 bg-[#F8FAFC] min-h-[calc(100vh-80px)]' : 'py-6 sm:py-8 bg-[#F8FAFC] min-h-[calc(100vh-140px)]'}
     >
-      <div className={pageMode === 'edit-jadwal' ? 'max-w-[1200px] mx-auto px-6 space-y-8' : 'max-w-[1380px] mx-auto px-4 sm:px-6 space-y-8'}>
+      <div className={pageMode === 'edit-jadwal' ? 'max-w-[1200px] mx-auto px-4 sm:px-6 space-y-6' : 'max-w-[1380px] mx-auto px-4 sm:px-6 space-y-6'}>
         {pageMode !== 'edit-jadwal' && (
           <>
-            {/* Dedicated Superadmin Page Header */}
-            <div className="bg-slate-900 text-white rounded-xl border border-slate-800 p-6 sm:p-8 flex flex-col lg:flex-row lg:items-center justify-between gap-6">
-          <div className="space-y-2">
-            <div className="flex flex-wrap items-center gap-2 text-xs font-mono text-emerald-400">
-              <ShieldCheck className="w-4 h-4 shrink-0" />
-              <span>HALAMAN KHUSUS SUPERADMIN · TADRIBUL LUGHAH (#/superadmin)</span>
+            {/* Clean Superadmin Workspace Header */}
+            <div className="bg-white rounded-2xl border border-slate-200 p-5 sm:p-6 shadow-2xs flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+              <div className="space-y-1.5">
+                <div className="inline-flex items-center gap-2 px-2.5 py-1 rounded-full bg-emerald-50 border border-emerald-200 text-[11px] font-mono font-semibold text-emerald-900">
+                  <ShieldCheck className="w-3.5 h-3.5 text-emerald-700 shrink-0" />
+                  <span>PUSAT KENDALI SUPERADMIN · TADRIBUL LUGHAH</span>
+                </div>
+                <h1
+                  id="superadmin-page-title"
+                  className="text-xl sm:text-2xl font-bold tracking-tight text-slate-900"
+                >
+                  Dashboard Manajemen Superadmin
+                </h1>
+                <p className="text-xs sm:text-sm text-slate-600 max-w-2xl leading-relaxed">
+                  Kelola jadwal kelas malam online (20.00 – 22.00 WIB), kurikulum Level 1–4, data peserta, laporan keuangan, serta materi &amp; database cPanel.
+                </p>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2.5 shrink-0">
+                {!onNavigateHome && onClose && (
+                  <button
+                    type="button"
+                    onClick={handleBackAction}
+                    className="inline-flex items-center gap-2 px-3.5 py-2 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 border border-slate-200 rounded-xl transition-colors cursor-pointer"
+                  >
+                    <ArrowLeft className="w-3.5 h-3.5" />
+                    <span>Kembali</span>
+                  </button>
+                )}
+
+                {currentUser ? (
+                  <button
+                    type="button"
+                    onClick={onLogout}
+                    className="inline-flex items-center gap-2 px-4 py-2.5 text-xs font-semibold text-rose-800 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-xl transition-colors cursor-pointer"
+                  >
+                    <LogOut className="w-3.5 h-3.5" />
+                    <span>Keluar Sesi Superadmin</span>
+                  </button>
+                ) : (
+                  <a
+                    href="./login.html?role=superadmin"
+                    className="inline-flex items-center gap-2 px-4 py-2.5 text-xs font-semibold text-white bg-emerald-900 hover:bg-emerald-800 rounded-xl transition-colors"
+                  >
+                    <ShieldCheck className="w-3.5 h-3.5" />
+                    <span>Masuk ke Portal Login</span>
+                  </a>
+                )}
+              </div>
             </div>
-            <h1
-              id="superadmin-page-title"
-              className="text-2xl sm:text-3xl font-semibold tracking-tight text-white"
-            >
-              Halaman Superadmin & Database SQL cPanel
-            </h1>
-            <p className="text-xs sm:text-sm text-slate-300 max-w-2xl leading-relaxed">
-              Pusat kendali pengeditan Kurikulum Level 1–3 (Ilmu Nahwu) & Level 4 (Ilmu Shorof), Jadwal Kelas Malam Online (20.00 – 22.00 WIB), Verifikasi Peserta, serta pengunduhan paket website <span className="font-mono text-emerald-300">.ZIP</span> & database <span className="font-mono text-emerald-300">.SQL</span> untuk cPanel.
-            </p>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-3 shrink-0">
-            <button
-              type="button"
-              onClick={handleBackAction}
-              className="inline-flex items-center gap-2 px-4 py-2.5 text-xs font-semibold text-slate-200 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-lg transition-colors"
-            >
-              <ArrowLeft className="w-3.5 h-3.5" />
-              Kembali ke Beranda
-            </button>
-
-            {currentUser ? (
-              <button
-                type="button"
-                onClick={onLogout}
-                className="inline-flex items-center gap-2 px-4 py-2.5 text-xs font-semibold text-white bg-rose-900/80 hover:bg-rose-800 border border-rose-700 rounded-lg transition-colors"
-              >
-                <LogOut className="w-3.5 h-3.5" />
-                Keluar ({currentUser.email})
-              </button>
-            ) : (
-              <button
-                type="button"
-                disabled={authLoading}
-                onClick={onLoginGoogle}
-                className="inline-flex items-center gap-2 px-4 py-2.5 text-xs font-semibold text-white bg-emerald-800 hover:bg-emerald-700 rounded-lg transition-colors disabled:opacity-50"
-              >
-                <LogIn className="w-3.5 h-3.5" />
-                {authLoading ? 'Memproses Login...' : 'Login Google Superadmin'}
-              </button>
-            )}
-          </div>
-        </div>
 
         {/* 4-Column KPI Summary Strip */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -2620,79 +2924,68 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
 
         {/* Main Workspace Container */}
         <div className="space-y-6">
-          {/* Status Toast (Top inline + Floating fixed agar selalu terlihat saat scroll) */}
+          {/* Floating Status Toast (Tunggal agar tata letak tidak melompat) */}
           {statusMessage && (
-            <>
-              <div
-                role="alert"
-                className={`p-4 rounded-lg border flex items-start gap-3 text-xs ${
-                  statusMessage.type === 'success'
-                    ? 'bg-emerald-50 border-emerald-300 text-emerald-950'
-                    : 'bg-rose-50 border-rose-300 text-rose-950'
-                }`}
-              >
-                {statusMessage.type === 'success' ? (
-                  <CheckCircle2 className="w-4 h-4 text-emerald-700 shrink-0 mt-0.5" />
-                ) : (
-                  <AlertCircle className="w-4 h-4 text-rose-700 shrink-0 mt-0.5" />
-                )}
-                <span className="font-medium flex-1">{statusMessage.text}</span>
-                <button
-                  type="button"
-                  onClick={() => setStatusMessage(null)}
-                  className="text-slate-400 hover:text-slate-700 cursor-pointer shrink-0"
-                  title="Tutup pemberitahuan"
+            <div
+              role="status"
+              aria-live="polite"
+              className={`fixed bottom-5 right-5 z-[70] max-w-md w-[calc(100vw-2.5rem)] p-4 rounded-xl border-2 shadow-2xl flex items-start gap-3 text-xs sm:text-sm animate-in fade-in duration-150 ${
+                statusMessage.type === 'success'
+                  ? 'bg-emerald-950 text-white border-emerald-500'
+                  : 'bg-rose-950 text-white border-rose-500'
+              }`}
+            >
+              {statusMessage.type === 'success' ? (
+                <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0 mt-0.5" />
+              ) : (
+                <AlertCircle className="w-5 h-5 text-rose-400 shrink-0 mt-0.5" />
+              )}
+              <div className="flex-1 space-y-0.5">
+                <p
+                  className={`font-bold text-[11px] uppercase tracking-wider ${
+                    statusMessage.type === 'success' ? 'text-emerald-300' : 'text-rose-300'
+                  }`}
                 >
-                  <X className="w-4 h-4" />
-                </button>
+                  {statusMessage.type === 'success' ? 'Berhasil Disimpan' : 'Perhatian'}
+                </p>
+                <p className="font-medium leading-snug">{statusMessage.text}</p>
               </div>
-
-              <div
-                role="status"
-                aria-live="polite"
-                className={`fixed bottom-5 right-5 z-[70] max-w-md w-[calc(100vw-2.5rem)] p-4 rounded-xl border-2 shadow-2xl flex items-start gap-3 text-xs sm:text-sm animate-in fade-in duration-150 ${
-                  statusMessage.type === 'success'
-                    ? 'bg-emerald-950 text-white border-emerald-500'
-                    : 'bg-rose-950 text-white border-rose-500'
-                }`}
+              <button
+                type="button"
+                onClick={() => setStatusMessage(null)}
+                className="p-1 rounded-lg text-white/70 hover:text-white hover:bg-white/10 transition-colors cursor-pointer shrink-0"
+                title="Tutup notifikasi"
               >
-                {statusMessage.type === 'success' ? (
-                  <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0 mt-0.5" />
-                ) : (
-                  <AlertCircle className="w-5 h-5 text-rose-400 shrink-0 mt-0.5" />
-                )}
-                <div className="flex-1 space-y-0.5">
-                  <p
-                    className={`font-bold text-[11px] uppercase tracking-wider ${
-                      statusMessage.type === 'success' ? 'text-emerald-300' : 'text-rose-300'
-                    }`}
-                  >
-                    {statusMessage.type === 'success' ? 'Berhasil Disimpan' : 'Perhatian'}
-                  </p>
-                  <p className="font-medium leading-snug">{statusMessage.text}</p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setStatusMessage(null)}
-                  className="p-1 rounded-lg text-white/70 hover:text-white hover:bg-white/10 transition-colors cursor-pointer shrink-0"
-                  title="Tutup notifikasi"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
-            </>
+                <X className="w-4 h-4" />
+              </button>
+            </div>
           )}
 
-          {/* Layout Workspace: Navigasi Samping Kiri + Konten Utama */}
-          <div className={pageMode !== 'edit-jadwal' ? 'flex flex-col lg:flex-row gap-6 lg:gap-8 items-start' : 'space-y-6'}>
+          {/* Layout Workspace: Navigasi Mengambang + Konten Utama Full Width */}
+          <div className="space-y-6">
             {pageMode !== 'edit-jadwal' && (
-              <aside className="w-full lg:w-72 shrink-0 lg:sticky lg:top-6">
-                <div className="bg-white border border-slate-200 rounded-2xl shadow-2xs overflow-hidden">
+              <>
+                <div
+                  aria-hidden="true"
+                  onClick={handleToggleNavHidden}
+                  className={`fixed inset-0 z-40 bg-slate-950/25 backdrop-blur-[1px] transition-opacity duration-300 ease-out ${
+                    isNavHidden ? 'opacity-0 pointer-events-none' : 'opacity-100'
+                  }`}
+                />
+                <aside
+                  aria-hidden={isNavHidden}
+                  className={`fixed top-[68px] left-4 sm:left-6 z-50 w-[calc(100vw-2rem)] max-w-[18.5rem] max-h-[calc(100vh-5.5rem)] overflow-y-auto rounded-2xl transition-all duration-300 ease-out ${
+                    isNavHidden
+                      ? '-translate-x-[calc(100%+2rem)] opacity-0 pointer-events-none'
+                      : 'translate-x-0 opacity-100'
+                  }`}
+                >
+                  <div className="bg-white border border-slate-200/90 rounded-2xl shadow-2xl overflow-hidden">
                   <div className="p-4 bg-slate-900 text-white border-b border-slate-800">
                     <p className="text-[10px] font-mono font-bold uppercase tracking-wider text-emerald-400">
                       NAVIGASI SUPERADMIN
                     </p>
-                    <p className="text-xs font-semibold text-slate-200 mt-0.5">
+                    <p className="text-xs font-semibold text-slate-200 mt-0.5 truncate">
                       Pusat Manajemen Program
                     </p>
                   </div>
@@ -2739,13 +3032,13 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
                         <span className="leading-snug">2. Detail Level &amp; Kurikulum</span>
                       </span>
                       <span
-                        className={`px-1.5 py-0.5 rounded text-[10px] font-mono shrink-0 ${
+                        className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-bold shrink-0 ${
                           activeTab === 'kurikulum'
                             ? 'bg-amber-800 text-amber-100'
                             : 'bg-amber-200/70 text-amber-950'
                         }`}
                       >
-                        index
+                        {programs.length}
                       </span>
                     </button>
 
@@ -2760,13 +3053,24 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
                     >
                       <span className="flex items-center gap-2.5 min-w-0">
                         <Users className="w-4 h-4 shrink-0" />
-                        <span className="truncate">3. Data Pendaftar ({registrations.length})</span>
+                        <span className="truncate">3. Data Pendaftar</span>
                       </span>
-                      {unselectedStudentAccounts.length > 0 && (
-                        <span className="px-1.5 py-0.5 rounded-full text-[10px] font-mono font-bold bg-amber-400 text-slate-950 shrink-0">
-                          +{unselectedStudentAccounts.length}
+                      <span className="flex items-center gap-1 shrink-0">
+                        {unselectedStudentAccounts.length > 0 && (
+                          <span className="px-1.5 py-0.5 rounded-full text-[10px] font-mono font-bold bg-amber-400 text-slate-950">
+                            +{unselectedStudentAccounts.length}
+                          </span>
+                        )}
+                        <span
+                          className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-bold ${
+                            activeTab === 'registrations'
+                              ? 'bg-slate-700 text-white'
+                              : 'bg-slate-100 text-slate-700'
+                          }`}
+                        >
+                          {registrations.length}
                         </span>
-                      )}
+                      </span>
                     </button>
 
                     <button
@@ -2782,15 +3086,6 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
                         <Receipt className={`w-4 h-4 shrink-0 ${activeTab === 'keuangan' ? 'text-emerald-300' : 'text-emerald-700'}`} />
                         <span className="truncate">4. Laporan Keuangan</span>
                       </span>
-                      <span
-                        className={`px-1.5 py-0.5 rounded-full text-[10px] font-mono font-bold shrink-0 ${
-                          activeTab === 'keuangan'
-                            ? 'bg-emerald-800 text-white'
-                            : 'bg-emerald-200/80 text-emerald-950'
-                        }`}
-                      >
-                        {formatIDR(financialStats.totalCashCollected)}
-                      </span>
                     </button>
 
                     <button
@@ -2805,15 +3100,6 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
                       <span className="flex items-center gap-2.5 min-w-0">
                         <Video className={`w-4 h-4 shrink-0 ${activeTab === 'materi' ? 'text-rose-200' : 'text-rose-500'} fill-current`} />
                         <span className="leading-snug">5. Video, Materi &amp; Latihan</span>
-                      </span>
-                      <span
-                        className={`px-1.5 py-0.5 rounded text-[10px] font-mono shrink-0 ${
-                          activeTab === 'materi'
-                            ? 'bg-rose-800 text-rose-100'
-                            : 'bg-rose-200/70 text-rose-950'
-                        }`}
-                      >
-                        materi
                       </span>
                     </button>
 
@@ -2846,11 +3132,12 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
                       </button>
                     </div>
                   )}
-                </div>
-              </aside>
+                  </div>
+                </aside>
+              </>
             )}
 
-            <div className="flex-1 min-w-0 w-full space-y-6">
+            <div className="min-w-0 w-full space-y-6">
 
           {/* TAB 0: DATABASE SQL CPANEL (MySQL / MariaDB / phpMyAdmin) */}
           {activeTab === 'cpanel-sql' && (
@@ -3160,27 +3447,19 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
                 <ShieldCheck className="w-6 h-6 text-emerald-800" />
               </div>
               <h3 className="text-lg font-semibold text-slate-900">
-                Otentikasi Superadmin Tadribul Lughah
+                Otentikasi Superadmin Diperlukan
               </h3>
               <p className="text-xs text-slate-600 leading-relaxed">
-                Masuk menggunakan akun Google Superadmin (
-                <span className="font-mono font-semibold text-slate-900">
-                  {SUPERADMIN_EMAIL}
-                </span>
-                ) untuk mengedit kurikulum Level 1–4, mengubah harga atau hari kelas, serta memverifikasi data peserta. Setiap perubahan otomatis memperbarui skrip SQL cPanel.
+                Silakan masuk melalui portal login Superadmin untuk mengelola kurikulum Level 1–4, jadwal kelas, data peserta, dan laporan keuangan.
               </p>
               <div className="pt-2">
-                <button
-                  type="button"
-                  disabled={authLoading}
-                  onClick={onLoginGoogle}
-                  className="inline-flex items-center justify-center gap-2 px-6 py-3 text-xs font-semibold text-white bg-emerald-900 hover:bg-emerald-800 rounded-lg transition-colors disabled:opacity-50"
+                <a
+                  href="./login.html?role=superadmin"
+                  className="inline-flex items-center justify-center gap-2 px-6 py-3 text-xs font-semibold text-white bg-emerald-900 hover:bg-emerald-800 rounded-lg transition-colors"
                 >
-                  <LogIn className="w-4 h-4" />
-                  {authLoading
-                    ? 'Memproses Login...'
-                    : 'Login dengan Google Superadmin'}
-                </button>
+                  <ShieldCheck className="w-4 h-4" />
+                  <span>Masuk ke Portal Login Superadmin</span>
+                </a>
               </div>
             </div>
           ) : activeTab !== 'cpanel-sql' && !isSuperAdmin ? (
@@ -3190,23 +3469,15 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
                 Akses Terbatas (Bukan Akun Superadmin)
               </h3>
               <p className="text-xs text-slate-600 leading-relaxed">
-                Anda saat ini masuk sebagai{' '}
-                <span className="font-mono font-semibold text-slate-900">
-                  {currentUser?.email}
-                </span>
-                . Hak akses pengeditan hanya diberikan kepada Superadmin{' '}
-                <span className="font-mono font-semibold text-emerald-900">
-                  {SUPERADMIN_EMAIL}
-                </span>
-                .
+                Akun yang sedang aktif tidak memiliki hak akses pengeditan Superadmin. Silakan keluar dan masuk kembali menggunakan kredensial Superadmin resmi.
               </p>
               <button
                 type="button"
                 onClick={onLogout}
-                className="inline-flex items-center gap-2 px-5 py-2.5 text-xs font-semibold text-white bg-slate-900 rounded-lg hover:bg-slate-800"
+                className="inline-flex items-center gap-2 px-5 py-2.5 text-xs font-semibold text-white bg-slate-900 rounded-lg hover:bg-slate-800 cursor-pointer"
               >
                 <LogOut className="w-4 h-4" />
-                Ganti Akun Google
+                Keluar &amp; Ganti Akun
               </button>
             </div>
           ) : (
@@ -3226,7 +3497,7 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
                         Daftar Jadwal Kelas Online ({schedules.length} Jadwal)
                       </h3>
                       <p className="text-xs text-slate-600 mt-0.5">
-                        Aturan <strong>1 Angkatan = 1 Kelas</strong>: klik kartu jadwal atau tombol Edit untuk mengatur jadwal Zoom, status pendaftaran (ON/OFF) khusus kelas ini, ON/OFF materi per pekan, dan daftar santri. (Informasi kurikulum publik <strong>index.html</strong> dikelola pada tab terpisah.)
+                        Aturan <strong>1 Angkatan = 1 Kelas</strong>: klik kartu jadwal atau tombol Edit untuk mengatur jadwal Zoom, status pendaftaran (ON/OFF) khusus kelas ini, ON/OFF materi per pekan, dan daftar santri. (Informasi kurikulum publik dikelola di tab <strong>2. Detail Level &amp; Kurikulum</strong>.)
                       </p>
                     </div>
 
@@ -3270,7 +3541,7 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
                         >
                           <div className="space-y-3">
                             {/* Top Badge Row */}
-                            <div className="flex items-center justify-between gap-2">
+                            <div className="flex flex-wrap items-start justify-between gap-2">
                               <div className="flex flex-wrap items-center gap-1.5">
                                 <span className="px-2.5 py-1 rounded-md text-xs font-mono font-bold bg-emerald-100 text-emerald-950 border border-emerald-300">
                                   {sch.batchCode}
@@ -3399,30 +3670,54 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
                                     />
                                   </div>
 
-                                  {/* Clickable P1..Pn ON/OFF Badges right on the Card */}
-                                  <div className="flex flex-wrap gap-1 pt-0.5">
-                                    {materiProgress.pekans.map((p) => {
-                                      const pOpen = isPekanUnlocked(targetProg.id, p.pekanNumber, sch.id);
-                                      return (
-                                        <button
-                                          key={`card-pill-${sch.id}-p${p.pekanNumber}`}
-                                          type="button"
-                                          onClick={() =>
-                                            handleTogglePekanUnlock(targetProg.id, p.pekanNumber, sch.id)
-                                          }
-                                          className={`px-1.5 py-0.5 rounded text-[10px] font-mono font-bold border transition-colors cursor-pointer flex items-center gap-0.5 ${
-                                            pOpen
-                                              ? 'bg-emerald-700 text-white border-emerald-800 hover:bg-emerald-800'
-                                              : 'bg-white text-slate-500 border-slate-300 hover:bg-rose-50 hover:text-rose-800 hover:border-rose-300'
-                                          }`}
-                                          title={`Pekan ${p.pekanNumber} (${p.title}): ${pOpen ? 'ON — Klik untuk OFF-kan' : 'OFF — Klik untuk ON-kan'} di kelas ${sch.batchCode}`}
-                                        >
-                                          <span>P{p.pekanNumber}</span>
-                                          <span>{pOpen ? '✓' : '✕'}</span>
-                                        </button>
-                                      );
-                                    })}
-                                  </div>
+                                  {/* Collapsible Clickable P1..Pn ON/OFF Badges on the Card */}
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      setExpandedSchedulePills((prev) => ({
+                                        ...prev,
+                                        [sch.id]: !prev[sch.id]
+                                      }))
+                                    }
+                                    className="w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg bg-white/80 hover:bg-white border border-indigo-200/80 text-[11px] font-semibold text-indigo-950 transition-colors cursor-pointer"
+                                  >
+                                    <span>
+                                      {expandedSchedulePills[sch.id]
+                                        ? `Sembunyikan Tombol Pekan (P1–P${materiProgress.totalCount})`
+                                        : `Atur Manual per Pekan (P1–P${materiProgress.totalCount})`}
+                                    </span>
+                                    {expandedSchedulePills[sch.id] ? (
+                                      <ChevronUp className="w-3.5 h-3.5 text-indigo-700" />
+                                    ) : (
+                                      <ChevronDown className="w-3.5 h-3.5 text-indigo-700" />
+                                    )}
+                                  </button>
+
+                                  {expandedSchedulePills[sch.id] && (
+                                    <div className="flex flex-wrap gap-1 pt-0.5">
+                                      {materiProgress.pekans.map((p) => {
+                                        const pOpen = isPekanUnlocked(targetProg.id, p.pekanNumber, sch.id);
+                                        return (
+                                          <button
+                                            key={`card-pill-${sch.id}-p${p.pekanNumber}`}
+                                            type="button"
+                                            onClick={() =>
+                                              handleTogglePekanUnlock(targetProg.id, p.pekanNumber, sch.id)
+                                            }
+                                            className={`px-1.5 py-0.5 rounded text-[10px] font-mono font-bold border transition-colors cursor-pointer flex items-center gap-0.5 ${
+                                              pOpen
+                                                ? 'bg-emerald-700 text-white border-emerald-800 hover:bg-emerald-800'
+                                                : 'bg-white text-slate-500 border-slate-300 hover:bg-rose-50 hover:text-rose-800 hover:border-rose-300'
+                                            }`}
+                                            title={`Pekan ${p.pekanNumber} (${p.title}): ${pOpen ? 'ON — Klik untuk OFF-kan' : 'OFF — Klik untuk ON-kan'} di kelas ${sch.batchCode}`}
+                                          >
+                                            <span>P{p.pekanNumber}</span>
+                                            <span>{pOpen ? '✓' : '✕'}</span>
+                                          </button>
+                                        );
+                                      })}
+                                    </div>
+                                  )}
                                 </div>
                               )}
                             </div>
@@ -3850,6 +4145,25 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
                         <p className="text-[11px] text-slate-500 mt-1 font-mono">
                           Cicilan 6x: {formatIDR(Math.round((editingSchedule.feeIDR || 0) / 6))}/bln · Berlaku khusus untuk {editingSchedule.angkatan?.trim() || 'Angkatan 1'}.
                         </p>
+                      </div>
+
+                      <div className="sm:col-span-2">
+                        <label className="block text-xs font-semibold text-slate-800 mb-1">
+                          Moda Pembelajaran — {editingSchedule.angkatan?.trim() || 'Angkatan 1'}
+                        </label>
+                        <input
+                          type="text"
+                          required
+                          placeholder="Contoh: Online Live Interaktif (Zoom)"
+                          value={editingSchedule.modeLabel ?? 'Online Live Interaktif (Zoom)'}
+                          onChange={(e) =>
+                            setEditingSchedule({
+                              ...editingSchedule,
+                              modeLabel: e.target.value
+                            })
+                          }
+                          className="w-full px-3 py-2 text-xs bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-emerald-800"
+                        />
                       </div>
 
                       <div className="sm:col-span-2 bg-emerald-50/70 p-4 rounded-xl border border-emerald-300 space-y-3">
@@ -4669,13 +4983,13 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
                         </div>
                         <div>
                           <span className="text-[11px] font-mono font-bold uppercase tracking-wider text-amber-800">
-                            INFORMASI PUBLIK HALAMAN DEPAN (INDEX.HTML)
+                            INFORMASI PUBLIK HALAMAN DEPAN
                           </span>
                           <h3 className="text-base sm:text-lg font-bold text-slate-900 mt-0.5">
                             Pengaturan Detail Level &amp; Kurikulum (Level 1 – Level 4)
                           </h3>
                           <p className="text-xs text-slate-600 mt-0.5 max-w-2xl">
-                            Khusus mengatur informasi kurikulum dan gambaran program yang tampil pada halaman depan &amp; pendaftaran calon santri (<span className="font-mono font-semibold text-amber-950">index.html</span>). Terpisah dari pengaturan jadwal kelas Zoom sehingga tidak mengubah jadwal per angkatan.
+                            Mengatur informasi kurikulum dan gambaran program yang tampil pada halaman depan &amp; pendaftaran calon santri. Terpisah dari pengaturan jadwal kelas Zoom sehingga tidak mengubah jadwal per angkatan.
                           </p>
                         </div>
                       </div>
@@ -4703,18 +5017,18 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
                     </div>
 
                     <form onSubmit={handleDetailKurikulumSubmit} className="p-5 sm:p-6 space-y-5">
-                      {/* Info Sinkronisasi ke index.html */}
+                      {/* Info Sinkronisasi ke Halaman Depan */}
                       <div className="p-3.5 bg-amber-50/70 border border-amber-200 rounded-xl flex flex-wrap items-center justify-between gap-2 text-xs">
                         <div className="flex flex-wrap items-center gap-2 text-amber-950">
                           <span className="font-mono font-bold px-2 py-0.5 rounded bg-white border border-amber-300">
                             {editingKurikulumProgram.code}
                           </span>
                           <span className="font-semibold">
-                            Menampilkan informasi Level {editingKurikulumProgram.levelNumber} kepada calon pendaftar di <span className="font-mono">index.html</span>
+                            Menampilkan informasi Level {editingKurikulumProgram.levelNumber} kepada calon pendaftar di Halaman Depan &amp; Pendaftaran
                           </span>
                         </div>
                         <span className="text-[11px] font-semibold text-amber-900">
-                          ✓ Sinkron ke index.html saja
+                          ✓ Sinkron ke Halaman Depan
                         </span>
                       </div>
 
@@ -4886,71 +5200,11 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
                               className="w-full px-3 py-2 text-xs bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-emerald-800"
                             />
                           </div>
-
-                          <div>
-                            <label className="block text-xs font-semibold text-slate-800 mb-1">
-                              Informasi Hari Belajar (Tampil di index.html)
-                            </label>
-                            <input
-                              type="text"
-                              required
-                              value={editingKurikulumProgram.scheduleDays}
-                              onChange={(e) =>
-                                setEditingKurikulumProgram({
-                                  ...editingKurikulumProgram,
-                                  scheduleDays: e.target.value
-                                })
-                              }
-                              className="w-full px-3 py-2 text-xs bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-emerald-800"
-                            />
-                          </div>
-
-                          <div>
-                            <label className="block text-xs font-semibold text-slate-800 mb-1">
-                              Informasi Jam Belajar WIB (Tampil di index.html)
-                            </label>
-                            <input
-                              type="text"
-                              required
-                              value={editingKurikulumProgram.scheduleTime}
-                              onChange={(e) =>
-                                setEditingKurikulumProgram({
-                                  ...editingKurikulumProgram,
-                                  scheduleTime: e.target.value
-                                })
-                              }
-                              className="w-full px-3 py-2 text-xs font-mono bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-emerald-800"
-                            />
-                          </div>
-
-                          <div>
-                            <label className="block text-xs font-semibold text-slate-800 mb-1">
-                              Moda Pembelajaran
-                            </label>
-                            <input
-                              type="text"
-                              required
-                              placeholder="Contoh: Online Live Interaktif (Zoom)"
-                              value={
-                                editingKurikulumProgram.modeLabel ??
-                                schedules.find((s) => s.programId === editingKurikulumProgram.id)
-                                  ?.modeLabel ??
-                                'Online Live Interaktif (Zoom)'
-                              }
-                              onChange={(e) =>
-                                setEditingKurikulumProgram({
-                                  ...editingKurikulumProgram,
-                                  modeLabel: e.target.value
-                                })
-                              }
-                              className="w-full px-3 py-2 text-xs bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-emerald-800"
-                            />
-                          </div>
                         </div>
 
                         <div className="pt-4 border-t border-amber-200/70 flex flex-wrap items-center justify-between gap-3">
                           <span className="text-[11px] text-slate-500">
-                            Menyimpan informasi <strong>Level {editingKurikulumProgram.levelNumber} ({editingKurikulumProgram.code})</strong> khusus untuk halaman depan &amp; pendaftaran (<span className="font-mono">index.html</span>).
+                            Menyimpan informasi <strong>Level {editingKurikulumProgram.levelNumber} ({editingKurikulumProgram.code})</strong> untuk halaman depan &amp; pendaftaran.
                           </span>
                           <button
                             type="submit"
@@ -4961,7 +5215,7 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
                             <span>
                               {isSaving
                                 ? 'Menyimpan...'
-                                : `Simpan Info Level ${editingKurikulumProgram.levelNumber} (index.html)`}
+                                : `Simpan Info Level ${editingKurikulumProgram.levelNumber}`}
                             </span>
                           </button>
                         </div>
@@ -5028,7 +5282,7 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
                   </div>
 
                   {/* Summary Metric Strip */}
-                  <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                     <div className="bg-white border border-slate-200 rounded-xl p-4">
                       <p className="text-[11px] font-mono text-slate-500 uppercase">Total Peserta</p>
                       <p className="text-xl font-bold font-mono text-slate-900 mt-1">{totalPeserta}</p>
@@ -5373,7 +5627,7 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
                       </div>
 
                       {/* Filter Level */}
-                      <div className="lg:col-span-3">
+                      <div className="lg:col-span-2">
                         <select
                           value={filterLevel}
                           onChange={(e) => {
@@ -5426,15 +5680,15 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
                       </div>
 
                       {/* Filter Gender */}
-                      <div className="lg:col-span-1">
+                      <div className="lg:col-span-2">
                         <select
                           value={filterGender}
                           onChange={(e) => setFilterGender(e.target.value)}
                           className="w-full px-3 py-2 text-xs bg-slate-50/50 border border-slate-300 rounded-lg focus:outline-none focus:border-emerald-800"
                         >
-                          <option value="all">Gender</option>
-                          <option value="Laki-laki">Ikhwan</option>
-                          <option value="Perempuan">Akhwat</option>
+                          <option value="all">Semua Gender</option>
+                          <option value="Laki-laki">Ikhwan (Laki-laki)</option>
+                          <option value="Perempuan">Akhwat (Perempuan)</option>
                         </select>
                       </div>
                     </div>
@@ -5681,7 +5935,7 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
                             })
                           ) : (
                             <tr>
-                              <td colSpan={10} className="py-12 text-center text-slate-500">
+                              <td colSpan={9} className="py-12 text-center text-slate-500">
                                 <Users className="w-8 h-8 text-slate-300 mx-auto mb-2" />
                                 <p className="text-sm font-semibold text-slate-800">
                                   Tidak ada data peserta yang cocok
@@ -6303,9 +6557,9 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
                     </div>
                   </div>
 
-                  {/* Section Alokasi Pengeluaran & Kas Lembaga (Google Plus 175k/bln & Kas Lembaga 20%) */}
+                  {/* Section Alokasi Pengeluaran & Kas Lembaga (Layanan Langganan Fleksibel & Kas Lembaga 20%) */}
                   <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-2xs space-y-5">
-                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pb-4 border-b border-slate-100">
+                    <div className="space-y-4 pb-4 border-b border-slate-100">
                       <div>
                         <div className="flex items-center gap-2">
                           <span className="p-1.5 bg-emerald-50 text-emerald-800 rounded-lg">
@@ -6316,24 +6570,133 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
                           </h3>
                         </div>
                         <p className="text-xs text-slate-500 mt-1">
-                          Formula: <span className="font-semibold text-slate-700">[Kas Masuk Terverifikasi]</span> dikurangi <span className="font-semibold text-rose-600">[Langganan Google Plus Rp 175.000/bln]</span>, lalu dialokasikan <span className="font-semibold text-amber-700">20% Kas Lembaga</span> dan <span className="font-semibold text-emerald-700">80% Kas Operasional & Asatidz</span>.
+                          Formula: <span className="font-semibold text-slate-700">[Kas Masuk Terverifikasi]</span> dikurangi{' '}
+                          <span className="font-semibold text-rose-600">
+                            {financialStats.hasSubmittedExpenses
+                              ? `[Total Pengeluaran Tercatat (${financeExpenses.length} transaksi)]`
+                              : `[Langganan ${activeExpenseShortLabel} ${formatIDR(activeMonthlyFee)}/bln]`}
+                          </span>
+                          , lalu dialokasikan <span className="font-semibold text-amber-700">20% Kas Lembaga</span> dan{' '}
+                          <span className="font-semibold text-emerald-700">80% Kas Operasional & Asatidz</span>.
                         </p>
                       </div>
-                      <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5 text-xs text-slate-700">
-                        <span className="font-semibold text-slate-600">Durasi Google Plus:</span>
-                        <select
-                          value={googleMonthsCount}
-                          onChange={(e) => setGoogleMonthsCount(Math.max(1, parseInt(e.target.value) || 1))}
-                          className="bg-white border border-slate-300 rounded px-2.5 py-1 text-xs font-bold text-slate-800 focus:outline-none focus:ring-1 focus:ring-emerald-500"
-                        >
-                          <option value={1}>1 Bulan (Rp 175.000)</option>
-                          <option value={2}>2 Bulan (Rp 350.000)</option>
-                          <option value={3}>3 Bulan / 1 Triwulan (Rp 525.000)</option>
-                          <option value={4}>4 Bulan (Rp 700.000)</option>
-                          <option value={5}>5 Bulan (Rp 875.000)</option>
-                          <option value={6}>6 Bulan / 1 Semester (Rp 1.050.000)</option>
-                          <option value={12}>12 Bulan / 1 Tahun (Rp 2.100.000)</option>
-                        </select>
+
+                      {/* Kontrol Layanan, Nominal Manual, Durasi, Tanggal & Tombol Submit */}
+                      <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3 text-xs">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                          <div>
+                            <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                              Jenis Layanan Langganan
+                            </label>
+                            <select
+                              value={expenseProvider}
+                              onChange={(e) => setExpenseProvider(e.target.value as ExpenseProviderKey)}
+                              className="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs font-bold text-slate-800 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                            >
+                              <option value="google_plus">Google Meet / Google Plus</option>
+                              <option value="zoom">Zoom</option>
+                              <option value="custom">Lainnya (Kustom)</option>
+                            </select>
+                            {expenseProvider === 'custom' && (
+                              <input
+                                type="text"
+                                value={customExpenseLabel}
+                                onChange={(e) => setCustomExpenseLabel(e.target.value)}
+                                placeholder="Nama layanan (misal: Google + Zoom)"
+                                className="mt-2 w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs font-medium text-slate-800 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                              />
+                            )}
+                          </div>
+
+                          <div>
+                            <label
+                              htmlFor="finance-monthly-fee-input"
+                              className="block text-[11px] font-semibold text-slate-600 mb-1"
+                            >
+                              Biaya {activeExpenseShortLabel} / Bulan (Rp)
+                            </label>
+                            <div className="relative">
+                              <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[11px] font-mono font-semibold text-slate-500">
+                                Rp
+                              </span>
+                              <input
+                                id="finance-monthly-fee-input"
+                                type="number"
+                                min={0}
+                                step={1000}
+                                value={activeMonthlyFee}
+                                onChange={(e) => {
+                                  const val = Math.max(0, parseInt(e.target.value, 10) || 0);
+                                  setExpenseFeesByProvider((prev) => ({
+                                    ...prev,
+                                    [expenseProvider]: val
+                                  }));
+                                }}
+                                className="w-full bg-white border border-slate-300 rounded-lg pl-8 pr-2.5 py-1.5 text-xs font-mono font-bold text-slate-800 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                              />
+                            </div>
+                          </div>
+
+                          <div>
+                            <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                              Durasi Langganan
+                            </label>
+                            <select
+                              value={expenseMonthsCount}
+                              onChange={(e) => setExpenseMonthsCount(Math.max(1, parseInt(e.target.value, 10) || 1))}
+                              className="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs font-bold text-slate-800 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                            >
+                              {[1, 2, 3, 4, 5, 6, 12].map((m) => (
+                                <option key={m} value={m}>
+                                  {m} Bulan{m === 3 ? ' / 1 Triwulan' : m === 6 ? ' / 1 Semester' : m === 12 ? ' / 1 Tahun' : ''} ({formatIDR(activeMonthlyFee * m)})
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+
+                          <div>
+                            <label
+                              htmlFor="finance-expense-date-input"
+                              className="block text-[11px] font-semibold text-slate-600 mb-1"
+                            >
+                              Tanggal Pembayaran
+                            </label>
+                            <input
+                              id="finance-expense-date-input"
+                              type="date"
+                              value={expenseDate}
+                              onChange={(e) => setExpenseDate(e.target.value)}
+                              className="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs font-mono font-bold text-slate-800 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                            />
+                          </div>
+                        </div>
+
+                        <div className="flex flex-col sm:flex-row sm:items-center gap-3 pt-1">
+                          <input
+                            type="text"
+                            value={expenseNotes}
+                            onChange={(e) => setExpenseNotes(e.target.value)}
+                            placeholder="Catatan opsional (misal: Perpanjangan Zoom Pro November 2026)"
+                            className="flex-1 bg-white border border-slate-300 rounded-lg px-3 py-2 text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                          />
+                          <button
+                            type="button"
+                            onClick={handleSubmitFinanceExpense}
+                            disabled={isSubmittingExpense}
+                            className="inline-flex items-center justify-center gap-2 px-4 py-2 bg-emerald-800 hover:bg-emerald-900 disabled:opacity-60 text-white font-semibold rounded-lg transition-colors shadow-2xs shrink-0"
+                          >
+                            {isSubmittingExpense ? (
+                              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            ) : (
+                              <Plus className="w-3.5 h-3.5" />
+                            )}
+                            <span>
+                              {isSubmittingExpense
+                                ? 'Menyimpan...'
+                                : `Submit ke Data (${formatIDR(activeMonthlyFee * expenseMonthsCount)})`}
+                            </span>
+                          </button>
+                        </div>
                       </div>
                     </div>
 
@@ -6353,18 +6716,31 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
                         </div>
                       </div>
 
-                      {/* Step 2: Google Plus Deduction */}
+                      {/* Step 2: Service Subscription Deduction */}
                       <div className="p-4 rounded-xl border border-rose-200 bg-rose-50/50 relative">
-                        <div className="text-[11px] font-bold uppercase tracking-wider text-rose-700 mb-1 flex items-center justify-between">
-                          <span>2. Langganan Google Plus</span>
-                          <span className="text-[10px] bg-rose-200 text-rose-800 px-1.5 py-0.5 rounded font-mono font-semibold">Beban Bulanan</span>
+                        <div className="text-[11px] font-bold uppercase tracking-wider text-rose-700 mb-1 flex items-center justify-between gap-1">
+                          <span className="truncate">
+                            2. {financialStats.hasSubmittedExpenses ? 'Beban Langganan' : `Langganan ${activeExpenseShortLabel}`}
+                          </span>
+                          <span className="text-[10px] bg-rose-200 text-rose-800 px-1.5 py-0.5 rounded font-mono font-semibold shrink-0">
+                            {financialStats.hasSubmittedExpenses ? 'Data Tercatat' : 'Simulasi'}
+                          </span>
                         </div>
                         <div className="text-xl font-black font-mono text-rose-700">
-                          - {formatIDR(financialStats.totalGoogleExpense)}
+                          - {formatIDR(financialStats.totalServiceExpense)}
                         </div>
                         <div className="text-[11px] text-rose-700/80 mt-1.5 flex items-center justify-between">
-                          <span>Rp 175.000 × {googleMonthsCount} bulan</span>
-                          <span className="font-mono text-[10px] font-semibold text-rose-800">Tiap Bulan</span>
+                          {financialStats.hasSubmittedExpenses ? (
+                            <>
+                              <span>Total dari {financeExpenses.length} transaksi disubmit</span>
+                              <span className="font-mono text-[10px] font-semibold text-rose-800">Tersimpan</span>
+                            </>
+                          ) : (
+                            <>
+                              <span>{formatIDR(activeMonthlyFee)} × {expenseMonthsCount} bulan</span>
+                              <span className="font-mono text-[10px] font-semibold text-rose-800">Tiap Bulan</span>
+                            </>
+                          )}
                         </div>
                       </div>
 
@@ -6378,7 +6754,7 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
                           {formatIDR(financialStats.kasLembaga20Percent)}
                         </div>
                         <div className="text-[11px] text-amber-800/80 mt-1.5">
-                          20% dari saldo bersih setelah Google ({formatIDR(financialStats.netAfterGoogle)})
+                          20% dari saldo bersih setelah beban ({formatIDR(financialStats.netAfterService)})
                         </div>
                       </div>
 
@@ -6403,7 +6779,7 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
                         <div className="w-2 h-2 rounded-full bg-emerald-600 animate-pulse"></div>
                         <span className="font-semibold text-slate-800">Transparansi Finansial:</span>
                         <span className="text-slate-600">
-                          {formatIDR(financialStats.totalCashCollected)} (Kas Masuk) - {formatIDR(financialStats.totalGoogleExpense)} (Google Plus) = <strong className="text-slate-900">{formatIDR(financialStats.netAfterGoogle)}</strong>
+                          {formatIDR(financialStats.totalCashCollected)} (Kas Masuk) - {formatIDR(financialStats.totalServiceExpense)} ({financialStats.hasSubmittedExpenses ? 'Total Pengeluaran Tercatat' : activeExpenseShortLabel}) = <strong className="text-slate-900">{formatIDR(financialStats.netAfterService)}</strong>
                         </span>
                       </div>
                       <div className="flex flex-wrap items-center gap-2 text-xs font-mono">
@@ -6414,6 +6790,89 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
                           👥 Operasional & Asatidz: {formatIDR(financialStats.sisaKasOperasional80Percent)} (80%)
                         </span>
                       </div>
+                    </div>
+
+                    {/* Riwayat Data Pengeluaran Langganan Tercatat */}
+                    <div className="pt-2 space-y-3">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                        <div>
+                          <h4 className="text-xs font-bold uppercase tracking-wider text-slate-800 flex items-center gap-1.5">
+                            <Calendar className="w-3.5 h-3.5 text-emerald-700" />
+                            <span>Riwayat Data Pengeluaran Langganan (Zoom / Google Meet / Lainnya)</span>
+                          </h4>
+                          <p className="text-[11px] text-slate-500 mt-0.5">
+                            Setiap transaksi yang disubmit tersimpan permanen di server dan otomatis memotong perhitungan kas bersih.
+                          </p>
+                        </div>
+                        <span className="text-[11px] font-mono font-bold px-2.5 py-1 rounded-md bg-rose-50 text-rose-800 border border-rose-200 self-start sm:self-auto">
+                          {financeExpenses.length} Transaksi · Total {formatIDR(financialStats.submittedExpensesTotal)}
+                        </span>
+                      </div>
+
+                      {financeExpenses.length > 0 ? (
+                        <div className="border border-slate-200 rounded-xl overflow-hidden">
+                          <div className="overflow-x-auto">
+                            <table className="w-full text-left text-xs border-collapse">
+                              <thead>
+                                <tr className="bg-slate-900 text-white font-mono text-[11px] uppercase tracking-wider">
+                                  <th className="py-2.5 px-3 font-semibold text-center w-10">No</th>
+                                  <th className="py-2.5 px-3 font-semibold">Tanggal</th>
+                                  <th className="py-2.5 px-3 font-semibold">Layanan</th>
+                                  <th className="py-2.5 px-3 font-semibold text-center">Durasi</th>
+                                  <th className="py-2.5 px-3 font-semibold text-right">Nominal</th>
+                                  <th className="py-2.5 px-3 font-semibold">Catatan</th>
+                                  <th className="py-2.5 px-3 font-semibold text-center w-20">Aksi</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-slate-200">
+                                {financeExpenses.map((exp, idx) => (
+                                  <tr key={exp.id} className="hover:bg-slate-50/80 transition-colors">
+                                    <td className="py-2.5 px-3 text-center font-mono text-slate-500">
+                                      {idx + 1}
+                                    </td>
+                                    <td className="py-2.5 px-3 font-medium text-slate-900 whitespace-nowrap">
+                                      {formatExpenseDateIndo(exp.date)}
+                                    </td>
+                                    <td className="py-2.5 px-3">
+                                      <span className="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-bold bg-slate-100 text-slate-800 border border-slate-200">
+                                        {exp.serviceName}
+                                      </span>
+                                    </td>
+                                    <td className="py-2.5 px-3 text-center font-mono text-slate-700 whitespace-nowrap">
+                                      {exp.monthsCount} bln ({formatIDR(exp.monthlyFeeIDR)}/bln)
+                                    </td>
+                                    <td className="py-2.5 px-3 text-right font-mono font-bold text-rose-700 whitespace-nowrap">
+                                      - {formatIDR(exp.amountIDR)}
+                                    </td>
+                                    <td className="py-2.5 px-3 text-slate-600">
+                                      {exp.notes || <span className="text-slate-400 italic">-</span>}
+                                    </td>
+                                    <td className="py-2.5 px-3 text-center">
+                                      <button
+                                        type="button"
+                                        onClick={() => handleDeleteFinanceExpense(exp)}
+                                        disabled={deletingExpenseId === exp.id}
+                                        title="Hapus data pengeluaran"
+                                        className="inline-flex items-center justify-center p-1.5 text-rose-600 hover:bg-rose-50 rounded-lg border border-transparent hover:border-rose-200 transition-colors disabled:opacity-50"
+                                      >
+                                        {deletingExpenseId === exp.id ? (
+                                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                        ) : (
+                                          <Trash2 className="w-3.5 h-3.5" />
+                                        )}
+                                      </button>
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="bg-slate-50 border border-dashed border-slate-300 rounded-xl p-4 text-center text-xs text-slate-500">
+                          Belum ada data pengeluaran langganan yang disubmit. Isi form di atas (pilih layanan, nominal, durasi, dan tanggal), lalu klik <strong>Submit ke Data</strong>.
+                        </div>
+                      )}
                     </div>
                   </div>
 
@@ -6783,15 +7242,14 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
                       <div className="flex items-center gap-2">
                         <span className="text-xs font-mono font-bold text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200 uppercase flex items-center gap-1">
                           <Video className="w-3.5 h-3.5 text-emerald-700" />
-                          EDITOR VIDEO YOUTUBE, MATERI & LATIHAN PEKAN
+                          EDITOR VIDEO YOUTUBE, MATERI &amp; LATIHAN PEKAN
                         </span>
-                        <span className="text-xs font-mono text-slate-400">· Halaman materi.html</span>
                       </div>
                       <h2 className="text-xl font-bold text-slate-900 mt-1">
-                        Kelola Video YouTube, Silabus & Latihan Mandiri Pekanan
+                        Kelola Video YouTube, Silabus &amp; Latihan Mandiri Pekanan
                       </h2>
                       <p className="text-xs text-slate-600 mt-0.5 max-w-2xl leading-relaxed">
-                        Superadmin dapat menautkan video pembelajaran YouTube untuk setiap pekan, mengatur audio mendengar, mengedit silabus, serta <strong className="text-emerald-950 font-bold">membuat dan mengelola latihan soal mandiri</strong>. Perubahan langsung tersimpan dan tampil di <strong className="text-slate-900">materi.html</strong>.
+                        Tautkan video pembelajaran YouTube untuk setiap pekan, atur audio mendengar, edit silabus, serta <strong className="text-emerald-950 font-bold">kelola latihan soal mandiri</strong>. Perubahan langsung tersimpan dan tampil di halaman materi pelajar.
                       </p>
                     </div>
 
@@ -6801,10 +7259,10 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
                         target="_blank"
                         rel="noopener noreferrer"
                         className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-emerald-900 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-lg transition-colors cursor-pointer"
-                        title="Buka halaman materi.html untuk pekan & jadwal kelas ini di tab baru"
+                        title="Buka halaman materi untuk pekan & jadwal kelas ini di tab baru"
                       >
                         <ExternalLink className="w-3.5 h-3.5" />
-                        <span>Pratinjau di materi.html ↗</span>
+                        <span>Pratinjau Halaman Materi ↗</span>
                       </a>
                     </div>
                   </div>
@@ -6866,18 +7324,21 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
                       </div>
                     </div>
 
-                    {/* Quick Pekan Lock / Unlock Control Matrix (Terkait Jadwal Kelas Zoom) */}
+                    {/* Unified Interactive Pekan Selector & ON/OFF Matrix (Terkait Jadwal Kelas Zoom) */}
                     <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3">
                       <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 pb-3 border-b border-slate-200/60">
                         <div className="space-y-1">
-                          <div className="flex items-center gap-2">
+                          <div className="flex flex-wrap items-center gap-2">
                             <Lock className="w-4 h-4 text-emerald-900" />
                             <h4 className="text-xs font-bold text-slate-900 uppercase tracking-wide">
-                              Kontrol ON/OFF Materi per Pekan ({programs.find(p => p.id === selectedMateriProgramId)?.code || 'Level'}):
+                              2. Pilih Pekan &amp; Kontrol ON/OFF ({programs.find(p => p.id === selectedMateriProgramId)?.code || 'Level'})
                             </h4>
+                            <span className="text-[11px] font-mono text-rose-800 font-semibold bg-rose-50 px-2 py-0.5 rounded border border-rose-200">
+                              Mengedit: Pekan {selectedMateriPekan}
+                            </span>
                           </div>
                           <p className="text-[11px] text-slate-600">
-                            Setiap kelas Zoom punya progres ON/OFF materi masing-masing. Anda juga bisa mengaturnya langsung dari tab <strong className="text-emerald-900">2. Edit Jadwal Kelas</strong>.
+                            Klik kartu pekan untuk memilih materi yang diedit, dan gunakan tombol ON/OFF di dalam kartu untuk mengatur akses kelas. Dapat juga diatur di tab <strong className="text-emerald-900">1. Edit Jadwal Kelas</strong>.
                           </p>
                         </div>
                         <div className="flex flex-wrap items-center gap-1.5 text-xs">
@@ -6887,7 +7348,7 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
                             className="px-2.5 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-900 border border-indigo-300 rounded font-bold text-[11px] cursor-pointer flex items-center gap-1"
                           >
                             <Calendar className="w-3 h-3" />
-                            <span>Atur di Jadwal Kelas Zoom →</span>
+                            <span>Atur di Jadwal Kelas →</span>
                           </button>
                           <button
                             type="button"
@@ -6953,18 +7414,32 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
                       <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2">
                         {materiPekanNumbers.map((num) => {
                           const unlocked = isPekanUnlocked(selectedMateriProgramId, num, activeSchId);
+                          const isCurrent = num === selectedMateriPekan;
                           return (
                             <div
                               key={`pekan-unlock-card-${num}`}
-                              className={`p-2.5 rounded-lg border text-xs flex flex-col justify-between gap-2 transition-all ${
-                                unlocked
-                                  ? 'bg-emerald-50/70 border-emerald-200 text-emerald-950'
-                                  : 'bg-white border-slate-200 text-slate-600'
+                              role="button"
+                              tabIndex={0}
+                              onClick={() => setSelectedMateriPekan(num)}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter' || e.key === ' ') {
+                                  e.preventDefault();
+                                  setSelectedMateriPekan(num);
+                                }
+                              }}
+                              className={`p-2.5 rounded-lg border text-xs flex flex-col justify-between gap-2 transition-all cursor-pointer select-none ${
+                                isCurrent
+                                  ? 'bg-rose-50/80 border-rose-500 ring-2 ring-rose-200 text-slate-900 shadow-xs'
+                                  : unlocked
+                                    ? 'bg-emerald-50/70 border-emerald-200 hover:border-emerald-400 text-emerald-950'
+                                    : 'bg-white border-slate-200 hover:border-slate-400 text-slate-600'
                               }`}
                             >
-                              <div className="flex items-center justify-between">
-                                <span className="font-bold font-mono">Pekan {num}</span>
-                                <span className={`text-[10px] font-mono font-bold px-1.5 py-0.2 rounded ${
+                              <div className="flex items-center justify-between gap-1">
+                                <span className={`font-bold font-mono ${isCurrent ? 'text-rose-900' : ''}`}>
+                                  Pekan {num}
+                                </span>
+                                <span className={`text-[10px] font-mono font-bold px-1.5 py-0.5 rounded ${
                                   unlocked ? 'bg-emerald-200 text-emerald-900' : 'bg-rose-100 text-rose-800'
                                 }`}>
                                   {unlocked ? 'ON' : 'OFF'}
@@ -6972,7 +7447,10 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
                               </div>
                               <button
                                 type="button"
-                                onClick={() => handleTogglePekanUnlock(selectedMateriProgramId, num, activeSchId)}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleTogglePekanUnlock(selectedMateriProgramId, num, activeSchId);
+                                }}
                                 className={`w-full py-1 px-1.5 rounded text-[11px] font-bold flex items-center justify-center gap-1 transition-colors cursor-pointer ${
                                   unlocked
                                     ? 'bg-rose-100 hover:bg-rose-200 text-rose-900 border border-rose-300'
@@ -6982,60 +7460,16 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
                                 {unlocked ? (
                                   <>
                                     <Lock className="w-3 h-3" />
-                                    <span>Matikan (OFF)</span>
+                                    <span>Matikan</span>
                                   </>
                                 ) : (
                                   <>
                                     <Unlock className="w-3 h-3" />
-                                    <span>Aktifkan (ON)</span>
+                                    <span>Aktifkan</span>
                                   </>
                                 )}
                               </button>
                             </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-
-                    {/* Choose Pekan */}
-                    <div className="pt-3 border-t border-slate-100">
-                      <div className="flex items-center justify-between mb-2">
-                        <span className="text-xs font-mono font-semibold text-slate-500 uppercase">
-                          2. Pilih Pekan Materi (1 s/d {totalMateriPekans}):
-                        </span>
-                        <span className="text-xs font-mono text-emerald-900 font-semibold bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
-                          Sedang Mengedit: Pekan ke-{selectedMateriPekan} ({isPekanUnlocked(selectedMateriProgramId, selectedMateriPekan, activeSchId) ? '🔓 ON' : '🔒 OFF'} di {activeMateriSchedule?.batchCode || selectedMateriProgramId})
-                        </span>
-                      </div>
-                      <div className="flex items-center gap-1.5 overflow-x-auto pb-1.5 text-xs">
-                        {materiPekanNumbers.map((num) => {
-                          const isCurrent = num === selectedMateriPekan;
-                          const isUnlocked = isPekanUnlocked(selectedMateriProgramId, num, activeSchId);
-                          return (
-                            <button
-                              key={num}
-                              type="button"
-                              onClick={() => setSelectedMateriPekan(num)}
-                              className={`shrink-0 px-3 py-1.5 rounded-lg border font-semibold transition-all cursor-pointer flex items-center gap-1.5 ${
-                                isCurrent
-                                  ? 'bg-rose-700 text-white border-rose-700 shadow-xs ring-2 ring-rose-200'
-                                  : isUnlocked
-                                    ? 'bg-emerald-50 text-emerald-950 border-emerald-300 hover:bg-emerald-100'
-                                    : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100 opacity-80'
-                              }`}
-                            >
-                              <span>{isUnlocked ? '🔓' : '🔒'}</span>
-                              <span>Pekan {num}</span>
-                              <span className={`text-[10px] font-mono px-1 rounded ${
-                                isCurrent
-                                  ? 'bg-rose-800 text-white'
-                                  : isUnlocked
-                                    ? 'bg-emerald-200 text-emerald-950'
-                                    : 'bg-slate-100 text-slate-500'
-                              }`}>
-                                {isUnlocked ? 'ON' : 'OFF'}
-                              </span>
-                            </button>
                           );
                         })}
                       </div>
