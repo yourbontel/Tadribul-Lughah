@@ -15,6 +15,7 @@ import {
   Languages,
   Loader2,
   RotateCcw,
+  Shuffle,
   Sparkles
 } from 'lucide-react';
 import {
@@ -38,6 +39,7 @@ function resolveProgressOwnerKey(): string {
 }
 
 type ArabicFontSize = 'md' | 'lg' | 'xl';
+type HarakatLevel = 100 | 50 | 0;
 
 const ARABIC_SIZE_CLASSES: Record<ArabicFontSize, string> = {
   md: 'text-2xl sm:text-[1.75rem]',
@@ -51,6 +53,23 @@ const ARABIC_SIZE_CLASSES: Record<ArabicFontSize, string> = {
  */
 function stripArabicHarakat(text: string): string {
   return text.replace(/[\u064B-\u065F\u0670]/g, '');
+}
+
+/**
+ * Hash sederhana untuk menghasilkan urutan acak yang konsisten per item & seed.
+ */
+function seededRandom(seedStr: string): () => number {
+  let h = 2166136261;
+  for (let i = 0; i < seedStr.length; i++) {
+    h ^= seedStr.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return () => {
+    h += 0x6d2b79f5;
+    let t = Math.imul(h ^ (h >>> 15), 1 | h);
+    t ^= t + Math.imul(t ^ (t >>> 7), 61 | t);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
 }
 
 export function MutholaahApp() {
@@ -109,7 +128,11 @@ export function MutholaahApp() {
   const completedIdsRef = useRef<string[]>(completedIds);
   completedIdsRef.current = completedIds;
 
-  const [showHarakat, setShowHarakat] = useState<boolean>(true);
+  const [harakatLevel, setHarakatLevel] = useState<HarakatLevel>(100);
+  const [shuffleSeed, setShuffleSeed] = useState<number>(0);
+  const [wordHarakatOverrides, setWordHarakatOverrides] = useState<
+    Record<number, boolean>
+  >({});
   const [showTranslation, setShowTranslation] = useState<boolean>(false);
   const [showNumberGrid, setShowNumberGrid] = useState<boolean>(false);
   const [showTasks, setShowTasks] = useState<boolean>(false);
@@ -217,9 +240,10 @@ export function MutholaahApp() {
     }
   }, [activeSeason, seasonIndices]);
 
-  // Reset translation visibility when switching number so student tries reading first
+  // Reset translation visibility & per-word overrides when switching number
   useEffect(() => {
     setShowTranslation(false);
+    setWordHarakatOverrides({});
   }, [activeSeason, currentIndex]);
 
   // Keyboard navigation (Left / Right arrow)
@@ -275,11 +299,58 @@ export function MutholaahApp() {
     ? completedIds.includes(currentItem.id)
     : false;
 
-  const displayedArabic = currentItem
-    ? showHarakat
-      ? currentItem.arabic
-      : stripArabicHarakat(currentItem.arabic)
-    : '';
+  const arabicTokens = useMemo(
+    () => (currentItem ? currentItem.arabic.split(/(\s+)/) : []),
+    [currentItem]
+  );
+
+  const baseHiddenWordIndices = useMemo(() => {
+    const hidden = new Set<number>();
+    if (!currentItem || harakatLevel === 100) return hidden;
+
+    const wordIndices: number[] = [];
+    arabicTokens.forEach((tok, idx) => {
+      if (tok && !/^\s+$/.test(tok) && /[\u0600-\u06FF]/.test(tok)) {
+        wordIndices.push(idx);
+      }
+    });
+
+    if (harakatLevel === 0) {
+      wordIndices.forEach((idx) => hidden.add(idx));
+      return hidden;
+    }
+
+    // Mode 50%: acak setengah kata untuk digundulkan
+    const rng = seededRandom(`${currentItem.id}:${shuffleSeed}`);
+    const shuffled = [...wordIndices];
+    for (let i = shuffled.length - 1; i > 0; i--) {
+      const j = Math.floor(rng() * (i + 1));
+      [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+    }
+    const hideCount = Math.ceil(shuffled.length / 2);
+    for (let i = 0; i < hideCount; i++) {
+      hidden.add(shuffled[i]);
+    }
+    return hidden;
+  }, [arabicTokens, currentItem, harakatLevel, shuffleSeed]);
+
+  const handleSelectHarakatLevel = (level: HarakatLevel) => {
+    setHarakatLevel(level);
+    setWordHarakatOverrides({});
+  };
+
+  const toggleWordHarakat = (tokenIndex: number) => {
+    const currentlyHidden =
+      tokenIndex in wordHarakatOverrides
+        ? wordHarakatOverrides[tokenIndex]
+        : baseHiddenWordIndices.has(tokenIndex);
+    setWordHarakatOverrides((prev) => ({
+      ...prev,
+      [tokenIndex]: !currentlyHidden
+    }));
+  };
+
+  const hasWordOverrides = Object.keys(wordHarakatOverrides).length > 0;
 
   return (
     <div className="min-h-screen bg-[#F8FAFC] text-slate-900 flex flex-col">
@@ -497,28 +568,56 @@ export function MutholaahApp() {
                   ))}
                 </div>
 
-                {/* Tombol Penampil Harokat */}
-                <button
-                  type="button"
-                  onClick={() => setShowHarakat((v) => !v)}
-                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold border transition-all cursor-pointer ${
-                    showHarakat
-                      ? 'bg-emerald-50 text-emerald-800 border-emerald-300 hover:bg-emerald-100'
-                      : 'bg-slate-800 text-white border-slate-800 hover:bg-slate-700'
-                  }`}
-                >
-                  {showHarakat ? (
-                    <>
-                      <Eye className="w-3.5 h-3.5" />
-                      Harokat: Tampil
-                    </>
-                  ) : (
-                    <>
-                      <EyeOff className="w-3.5 h-3.5" />
-                      Harokat: Sembunyi
-                    </>
+                {/* Tombol Penampil Harokat (100% / 50% / 0%) */}
+                <div className="inline-flex items-center rounded-xl border border-slate-200 bg-white p-0.5">
+                  <span className="inline-flex items-center gap-1 px-2 text-[11px] font-semibold text-slate-500">
+                    {harakatLevel === 0 ? (
+                      <EyeOff className="w-3.5 h-3.5 text-slate-700" />
+                    ) : (
+                      <Eye className="w-3.5 h-3.5 text-emerald-700" />
+                    )}
+                    <span className="hidden sm:inline">Harokat:</span>
+                  </span>
+                  {([100, 50, 0] as HarakatLevel[]).map((lvl) => (
+                    <button
+                      key={lvl}
+                      type="button"
+                      onClick={() => handleSelectHarakatLevel(lvl)}
+                      className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
+                        harakatLevel === lvl
+                          ? lvl === 100
+                            ? 'bg-emerald-600 text-white'
+                            : lvl === 50
+                            ? 'bg-amber-600 text-white'
+                            : 'bg-slate-800 text-white'
+                          : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+                      }`}
+                      title={
+                        lvl === 100
+                          ? 'Tampilkan semua harokat (100%)'
+                          : lvl === 50
+                          ? 'Hilangkan harokat setengah kata (50%)'
+                          : 'Sembunyikan semua harokat / gundul (0%)'
+                      }
+                    >
+                      {lvl}%
+                    </button>
+                  ))}
+                  {harakatLevel === 50 && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShuffleSeed((s) => s + 1);
+                        setWordHarakatOverrides({});
+                      }}
+                      className="ml-0.5 inline-flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-semibold text-amber-800 bg-amber-50 hover:bg-amber-100 transition-colors cursor-pointer"
+                      title="Acak ulang kata yang digundulkan"
+                    >
+                      <Shuffle className="w-3 h-3" />
+                      <span className="hidden md:inline">Acak</span>
+                    </button>
                   )}
-                </button>
+                </div>
 
                 {/* Tombol Tandai Selesai */}
                 <button
@@ -562,14 +661,55 @@ export function MutholaahApp() {
                 lang="ar"
                 className={`font-arabic ${ARABIC_SIZE_CLASSES[fontSize]} text-slate-900 bg-[#FCFBF7] border border-amber-200/60 rounded-2xl p-6 sm:p-8 whitespace-pre-line text-right shadow-inner`}
               >
-                {displayedArabic}
+                {arabicTokens.map((tok, idx) => {
+                  const isArabicWord =
+                    tok && !/^\s+$/.test(tok) && /[\u0600-\u06FF]/.test(tok);
+                  if (!isArabicWord) {
+                    return <React.Fragment key={idx}>{tok}</React.Fragment>;
+                  }
+                  const isHidden =
+                    idx in wordHarakatOverrides
+                      ? wordHarakatOverrides[idx]
+                      : baseHiddenWordIndices.has(idx);
+                  const displayWord = isHidden ? stripArabicHarakat(tok) : tok;
+                  return (
+                    <button
+                      key={idx}
+                      type="button"
+                      onClick={() => toggleWordHarakat(idx)}
+                      title={
+                        isHidden
+                          ? 'Klik untuk tampilkan harokat kata ini'
+                          : 'Klik untuk sembunyikan harokat kata ini'
+                      }
+                      className={`inline bg-transparent border-0 p-0 font-inherit text-inherit rounded-md px-0.5 transition-colors cursor-pointer hover:bg-amber-200/45 ${
+                        isHidden ? 'text-slate-800' : ''
+                      }`}
+                    >
+                      {displayWord}
+                    </button>
+                  );
+                })}
               </div>
-              {!showHarakat && (
-                <p className="text-[11px] text-slate-500 mt-2 text-center">
-                  Mode tanpa harokat aktif — cocok untuk melatih kemampuan membaca
-                  teks gundul.
-                </p>
-              )}
+              <div className="mt-2.5 flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-[11px] text-slate-500">
+                <span>
+                  {harakatLevel === 0
+                    ? 'Mode gundul (0%) aktif — klik kata tertentu jika ingin melihat harokatnya.'
+                    : harakatLevel === 50
+                    ? 'Mode sebagian (50%) aktif — klik kata mana saja untuk tampil/sembunyikan harokatnya.'
+                    : 'Klik kata mana saja untuk menyembunyikan harokat kata tersebut.'}
+                </span>
+                {hasWordOverrides && (
+                  <button
+                    type="button"
+                    onClick={() => setWordHarakatOverrides({})}
+                    className="inline-flex items-center gap-1 font-semibold text-emerald-700 hover:text-emerald-900 underline cursor-pointer"
+                  >
+                    <RotateCcw className="w-3 h-3" />
+                    Reset pilihan kata
+                  </button>
+                )}
+              </div>
             </div>
 
             {/* Translation Toggle & Panel */}
