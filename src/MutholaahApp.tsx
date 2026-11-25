@@ -720,16 +720,6 @@ export function MutholaahApp() {
                     ? 'Mode sebagian (50%) aktif — klik kata mana saja untuk tampil/sembunyikan harokatnya.'
                     : 'Klik kata mana saja untuk menyembunyikan harokat kata tersebut.'}
                 </span>
-                {hasWordOverrides && (
-                  <button
-                    type="button"
-                    onClick={() => setWordHarakatOverrides({})}
-                    className="inline-flex items-center gap-1 font-semibold text-emerald-700 hover:text-emerald-900 underline cursor-pointer"
-                  >
-                    <RotateCcw className="w-3 h-3" />
-                    Reset pilihan kata
-                  </button>
-                )}
               </div>
             </div>
 
@@ -852,6 +842,21 @@ export function MutholaahApp() {
           </section>
         )}
       </main>
+
+      {hasWordOverrides && (
+        <button
+          type="button"
+          onClick={() => setWordHarakatOverrides({})}
+          title="Reset pilihan kata"
+          aria-label="Reset pilihan kata"
+          className="fixed bottom-5 right-4 lg:bottom-auto lg:top-1/2 lg:-translate-y-1/2 lg:right-5 z-40 inline-flex items-center justify-center gap-2 p-3 sm:px-4 sm:py-2.5 rounded-full bg-white/95 backdrop-blur-md text-emerald-800 border border-emerald-300 shadow-lg hover:bg-emerald-50 hover:border-emerald-400 hover:text-emerald-950 active:scale-95 transition-all cursor-pointer text-xs sm:text-sm font-semibold"
+        >
+          <RotateCcw className="w-4 h-4 shrink-0" />
+          <span className="hidden sm:inline whitespace-nowrap">
+            Reset pilihan kata
+          </span>
+        </button>
+      )}
     </div>
   );
 }
