@@ -2,9 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ArrowLeft,
   ArrowRight,
-  BookMarked,
   BookOpen,
-  Check,
   CheckCircle2,
   Circle,
   Cloud,
@@ -16,12 +14,9 @@ import {
   Home,
   Languages,
   Loader2,
-  Pencil,
   RotateCcw,
   Shuffle,
-  Sparkles,
-  Trash2,
-  X
+  Sparkles
 } from 'lucide-react';
 import {
   MUTHOLAAH_LEVEL_1_ITEMS,
@@ -31,12 +26,8 @@ import {
 import { getActiveStudentSession } from './utils/studentAccountStore';
 
 const STORAGE_COMPLETED_KEY = 'tl_mutolaah_lv1_completed_v1';
-const STORAGE_MEANINGS_KEY = 'tl_mutolaah_lv1_meanings_v1';
 const STORAGE_STATE_KEY = 'tl_mutolaah_lv1_state_v1';
 const MUTHOLAAH_API_URL = './api.php?entity=mutolaah_progress';
-
-type WordMeaningsMap = Record<string, Record<string, string>>;
-type WordClickMode = 'meaning' | 'harakat';
 
 function resolveProgressOwnerKey(): string {
   const session = getActiveStudentSession();
@@ -148,7 +139,6 @@ export function MutholaahApp() {
 
   const progressOwnerKey = useMemo(() => resolveProgressOwnerKey(), []);
   const ownerStorageKey = `${STORAGE_COMPLETED_KEY}:${progressOwnerKey}`;
-  const ownerMeaningsStorageKey = `${STORAGE_MEANINGS_KEY}:${progressOwnerKey}`;
 
   const [completedIds, setCompletedIds] = useState<string[]>(() => {
     try {
@@ -167,42 +157,17 @@ export function MutholaahApp() {
     return [];
   });
 
-  const [wordMeanings, setWordMeanings] = useState<WordMeaningsMap>(() => {
-    try {
-      const saved = localStorage.getItem(ownerMeaningsStorageKey);
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-          return parsed;
-        }
-      }
-    } catch {
-      // ignore storage errors
-    }
-    return {};
-  });
-
   const [dbSyncStatus, setDbSyncStatus] = useState<
     'idle' | 'loading' | 'saving' | 'saved' | 'error'
   >('loading');
   const completedIdsRef = useRef<string[]>(completedIds);
   completedIdsRef.current = completedIds;
-  const wordMeaningsRef = useRef<WordMeaningsMap>(wordMeanings);
-  wordMeaningsRef.current = wordMeanings;
 
   const [harakatLevel, setHarakatLevel] = useState<HarakatLevel>(100);
   const [shuffleSeed, setShuffleSeed] = useState<number>(0);
   const [wordHarakatOverrides, setWordHarakatOverrides] = useState<
     Record<number, WordHarakatState>
   >({});
-  const [wordClickMode, setWordClickMode] = useState<WordClickMode>('meaning');
-  const [showWordMeanings, setShowWordMeanings] = useState<boolean>(true);
-  const [editingWord, setEditingWord] = useState<{
-    tokenIndex: number;
-    arabicWord: string;
-  } | null>(null);
-  const [meaningDraft, setMeaningDraft] = useState<string>('');
-  const meaningInputRef = useRef<HTMLInputElement | null>(null);
   const [showTranslation, setShowTranslation] = useState<boolean>(false);
   const [showNumberGrid, setShowNumberGrid] = useState<boolean>(false);
   const [showTasks, setShowTasks] = useState<boolean>(false);
@@ -232,19 +197,8 @@ export function MutholaahApp() {
     }
   }, [completedIds, ownerStorageKey, progressOwnerKey]);
 
-  useEffect(() => {
-    try {
-      localStorage.setItem(
-        ownerMeaningsStorageKey,
-        JSON.stringify(wordMeanings)
-      );
-    } catch {
-      // ignore storage errors
-    }
-  }, [wordMeanings, ownerMeaningsStorageKey]);
-
-  const syncProgressToDatabase = useCallback(
-    async (nextIds: string[], nextMeanings: WordMeaningsMap) => {
+  const syncCompletedToDatabase = useCallback(
+    async (nextIds: string[]) => {
       setDbSyncStatus('saving');
       try {
         const res = await fetch(MUTHOLAAH_API_URL, {
@@ -253,7 +207,6 @@ export function MutholaahApp() {
           body: JSON.stringify({
             [progressOwnerKey]: {
               completedIds: nextIds,
-              wordMeanings: nextMeanings,
               updatedAt: new Date().toISOString()
             }
           })
@@ -273,7 +226,7 @@ export function MutholaahApp() {
     [progressOwnerKey]
   );
 
-  // Load saved completion progress & word meanings from database on mount
+  // Load saved completion progress from database on mount
   useEffect(() => {
     let cancelled = false;
     async function loadFromDatabase() {
@@ -287,26 +240,11 @@ export function MutholaahApp() {
         if (cancelled) return;
 
         const remoteEntry = data && typeof data === 'object' ? data[progressOwnerKey] : null;
-        if (remoteEntry && typeof remoteEntry === 'object') {
-          if (Array.isArray(remoteEntry.completedIds)) {
-            setCompletedIds(remoteEntry.completedIds);
-          }
-          if (
-            remoteEntry.wordMeanings &&
-            typeof remoteEntry.wordMeanings === 'object' &&
-            !Array.isArray(remoteEntry.wordMeanings)
-          ) {
-            setWordMeanings(remoteEntry.wordMeanings);
-          }
+        if (remoteEntry && Array.isArray(remoteEntry.completedIds)) {
+          setCompletedIds(remoteEntry.completedIds);
           setDbSyncStatus('saved');
-        } else if (
-          completedIdsRef.current.length > 0 ||
-          Object.keys(wordMeaningsRef.current).length > 0
-        ) {
-          await syncProgressToDatabase(
-            completedIdsRef.current,
-            wordMeaningsRef.current
-          );
+        } else if (completedIdsRef.current.length > 0) {
+          await syncCompletedToDatabase(completedIdsRef.current);
         } else {
           setDbSyncStatus('saved');
         }
@@ -320,7 +258,7 @@ export function MutholaahApp() {
     return () => {
       cancelled = true;
     };
-  }, [progressOwnerKey, syncProgressToDatabase]);
+  }, [progressOwnerKey, syncCompletedToDatabase]);
 
   useEffect(() => {
     try {
@@ -337,21 +275,11 @@ export function MutholaahApp() {
     }
   }, [activeSeason, seasonIndices]);
 
-  // Reset translation visibility, per-word overrides & word editor when switching number
+  // Reset translation visibility & per-word overrides when switching number
   useEffect(() => {
     setShowTranslation(false);
     setWordHarakatOverrides({});
-    setEditingWord(null);
-    setMeaningDraft('');
   }, [activeSeason, currentIndex]);
-
-  useEffect(() => {
-    if (editingWord) {
-      setTimeout(() => {
-        meaningInputRef.current?.focus();
-      }, 20);
-    }
-  }, [editingWord]);
 
   // Keyboard navigation (Left / Right arrow)
   useEffect(() => {
@@ -383,15 +311,7 @@ export function MutholaahApp() {
   const updateCompletedIds = (updater: (prev: string[]) => string[]) => {
     const nextIds = updater(completedIdsRef.current);
     setCompletedIds(nextIds);
-    void syncProgressToDatabase(nextIds, wordMeaningsRef.current);
-  };
-
-  const updateWordMeanings = (
-    updater: (prev: WordMeaningsMap) => WordMeaningsMap
-  ) => {
-    const nextMeanings = updater(wordMeaningsRef.current);
-    setWordMeanings(nextMeanings);
-    void syncProgressToDatabase(completedIdsRef.current, nextMeanings);
+    void syncCompletedToDatabase(nextIds);
   };
 
   const toggleCompleted = (id: string) => {
@@ -450,83 +370,6 @@ export function MutholaahApp() {
   };
 
   const hasWordOverrides = Object.keys(wordHarakatOverrides).length > 0;
-
-  const currentItemMeanings = useMemo(
-    () => (currentItem ? wordMeanings[currentItem.id] ?? {} : {}),
-    [currentItem, wordMeanings]
-  );
-
-  const openWordMeaningEditor = (tokenIndex: number, arabicWord: string) => {
-    const existing = currentItemMeanings[String(tokenIndex)] ?? '';
-    setEditingWord({ tokenIndex, arabicWord });
-    setMeaningDraft(existing);
-  };
-
-  const handleArabicWordClick = (tokenIndex: number, arabicWord: string) => {
-    if (wordClickMode === 'harakat') {
-      toggleWordHarakat(tokenIndex);
-      return;
-    }
-    openWordMeaningEditor(tokenIndex, arabicWord);
-  };
-
-  const handleSaveWordMeaning = (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
-    if (!currentItem || !editingWord) return;
-    const trimmed = meaningDraft.trim();
-    const itemId = currentItem.id;
-    const tokenKey = String(editingWord.tokenIndex);
-
-    updateWordMeanings((prev) => {
-      const nextItemMap = { ...(prev[itemId] ?? {}) };
-      if (trimmed) {
-        nextItemMap[tokenKey] = trimmed;
-      } else {
-        delete nextItemMap[tokenKey];
-      }
-      const nextAll = { ...prev };
-      if (Object.keys(nextItemMap).length > 0) {
-        nextAll[itemId] = nextItemMap;
-      } else {
-        delete nextAll[itemId];
-      }
-      return nextAll;
-    });
-    setEditingWord(null);
-    setMeaningDraft('');
-  };
-
-  const handleDeleteWordMeaning = (tokenIndex: number) => {
-    if (!currentItem) return;
-    const itemId = currentItem.id;
-    const tokenKey = String(tokenIndex);
-    updateWordMeanings((prev) => {
-      const nextItemMap = { ...(prev[itemId] ?? {}) };
-      delete nextItemMap[tokenKey];
-      const nextAll = { ...prev };
-      if (Object.keys(nextItemMap).length > 0) {
-        nextAll[itemId] = nextItemMap;
-      } else {
-        delete nextAll[itemId];
-      }
-      return nextAll;
-    });
-    if (editingWord?.tokenIndex === tokenIndex) {
-      setEditingWord(null);
-      setMeaningDraft('');
-    }
-  };
-
-  const currentMeaningEntries = useMemo(() => {
-    return Object.entries(currentItemMeanings)
-      .map(([k, meaning]) => ({
-        tokenIndex: Number(k),
-        arabicWord: arabicTokens[Number(k)] ?? '',
-        meaning
-      }))
-      .filter((entry) => entry.arabicWord && entry.meaning)
-      .sort((a, b) => a.tokenIndex - b.tokenIndex);
-  }, [arabicTokens, currentItemMeanings]);
 
   return (
     <div className="min-h-screen bg-[#F8FAFC] text-slate-900 flex flex-col">
@@ -832,67 +675,10 @@ export function MutholaahApp() {
 
             {/* Arabic Reading Area */}
             <div className="px-5 sm:px-8 py-6">
-              {/* Mode Klik & Tampilan Arti Kata */}
-              <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                <div className="inline-flex items-center rounded-xl border border-slate-200 bg-slate-50 p-0.5 text-xs">
-                  <span className="px-2 text-[11px] font-semibold text-slate-500 hidden sm:inline">
-                    Klik Kata:
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => setWordClickMode('meaning')}
-                    className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg font-semibold transition-colors cursor-pointer ${
-                      wordClickMode === 'meaning'
-                        ? 'bg-emerald-600 text-white shadow-xs'
-                        : 'text-slate-600 hover:text-slate-900'
-                    }`}
-                  >
-                    <Pencil className="w-3 h-3" />
-                    Beri Arti
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setWordClickMode('harakat');
-                      setEditingWord(null);
-                    }}
-                    className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg font-semibold transition-colors cursor-pointer ${
-                      wordClickMode === 'harakat'
-                        ? 'bg-amber-600 text-white shadow-xs'
-                        : 'text-slate-600 hover:text-slate-900'
-                    }`}
-                  >
-                    <Eye className="w-3 h-3" />
-                    Ubah Harokat
-                  </button>
-                </div>
-
-                {currentMeaningEntries.length > 0 && (
-                  <button
-                    type="button"
-                    onClick={() => setShowWordMeanings((v) => !v)}
-                    className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl text-xs font-semibold border transition-colors cursor-pointer ${
-                      showWordMeanings
-                        ? 'bg-emerald-50 text-emerald-800 border-emerald-200 hover:bg-emerald-100'
-                        : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
-                    }`}
-                  >
-                    {showWordMeanings ? (
-                      <Eye className="w-3.5 h-3.5" />
-                    ) : (
-                      <EyeOff className="w-3.5 h-3.5" />
-                    )}
-                    {showWordMeanings
-                      ? `Arti Kata Tampil (${currentMeaningEntries.length})`
-                      : `Arti Kata Disembunyikan (${currentMeaningEntries.length})`}
-                  </button>
-                )}
-              </div>
-
               <div
                 dir="rtl"
                 lang="ar"
-                className={`font-arabic ${ARABIC_SIZE_CLASSES[fontSize]} text-slate-900 bg-[#FCFBF7] border border-amber-200/60 rounded-2xl p-6 sm:p-8 whitespace-pre-line text-right shadow-inner leading-loose`}
+                className={`font-arabic ${ARABIC_SIZE_CLASSES[fontSize]} text-slate-900 bg-[#FCFBF7] border border-amber-200/60 rounded-2xl p-6 sm:p-8 whitespace-pre-line text-right shadow-inner`}
               >
                 {arabicTokens.map((tok, idx) => {
                   const isArabicWord =
@@ -907,195 +693,32 @@ export function MutholaahApp() {
                       : wordState === 'partial'
                       ? partialWordVariants.get(idx) ?? tok
                       : stripArabicHarakat(tok);
-                  const savedMeaning = currentItemMeanings[String(idx)];
-                  const isEditingThis = editingWord?.tokenIndex === idx;
                   return (
                     <button
                       key={idx}
                       type="button"
-                      onClick={() => handleArabicWordClick(idx, tok)}
+                      onClick={() => toggleWordHarakat(idx)}
                       title={
-                        wordClickMode === 'meaning'
-                          ? savedMeaning
-                            ? `Arti: ${savedMeaning} (klik untuk edit)`
-                            : 'Klik untuk memberi arti kata ini'
-                          : wordState === 'full'
+                        wordState === 'full'
                           ? 'Klik untuk sembunyikan harokat kata ini'
                           : 'Klik untuk tampilkan semua harokat kata ini'
                       }
-                      className={`inline-flex flex-col items-center align-top bg-transparent border-0 font-inherit text-inherit rounded-lg px-1 py-0.5 transition-colors cursor-pointer hover:bg-amber-200/45 ${
-                        isEditingThis
-                          ? 'ring-2 ring-emerald-500 bg-emerald-50/90'
-                          : savedMeaning
-                          ? 'bg-emerald-50/70 border-b-2 border-emerald-400/70'
-                          : ''
-                      } ${wordState === 'none' ? 'text-slate-800' : ''}`}
+                      className={`inline bg-transparent border-0 p-0 font-inherit text-inherit rounded-md px-0.5 transition-colors cursor-pointer hover:bg-amber-200/45 ${
+                        wordState === 'none' ? 'text-slate-800' : ''
+                      }`}
                     >
-                      <span>{displayWord}</span>
-                      {showWordMeanings && savedMeaning && (
-                        <span
-                          dir="ltr"
-                          className="font-sans text-[11px] sm:text-xs font-semibold text-emerald-800 bg-emerald-100/90 border border-emerald-200/80 rounded-md px-1.5 py-0.5 mt-1 leading-tight max-w-[140px] truncate"
-                        >
-                          {savedMeaning}
-                        </span>
-                      )}
+                      {displayWord}
                     </button>
                   );
                 })}
               </div>
-
-              {/* Editor Arti Kata (muncul saat klik kata di mode Beri Arti) */}
-              {editingWord && (
-                <form
-                  onSubmit={handleSaveWordMeaning}
-                  className="mt-3 rounded-2xl bg-emerald-50/70 border border-emerald-200 p-4 shadow-xs space-y-3"
-                >
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <div className="flex items-center gap-3">
-                      <span
-                        dir="rtl"
-                        lang="ar"
-                        className="font-arabic text-2xl text-slate-900 bg-white px-3 py-1 rounded-xl border border-emerald-200 shadow-2xs"
-                      >
-                        {editingWord.arabicWord}
-                      </span>
-                      <div className="text-xs text-slate-600">
-                        <p className="font-bold text-emerald-950">
-                          Beri Arti / Catatan Kata
-                        </p>
-                        <p className="text-[11px] text-slate-500">
-                          Tersimpan otomatis ke database &amp; browser
-                        </p>
-                      </div>
-                    </div>
-
-                    <div className="flex items-center gap-1.5">
-                      <button
-                        type="button"
-                        onClick={() => toggleWordHarakat(editingWord.tokenIndex)}
-                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold bg-white text-slate-700 border border-slate-200 hover:bg-slate-50 cursor-pointer"
-                        title="Tampil/sembunyikan harokat khusus kata ini"
-                      >
-                        {(wordHarakatOverrides[editingWord.tokenIndex] ??
-                          baseWordState) === 'full' ? (
-                          <>
-                            <EyeOff className="w-3.5 h-3.5" />
-                            Gundulkan Kata
-                          </>
-                        ) : (
-                          <>
-                            <Eye className="w-3.5 h-3.5" />
-                            Tampilkan Harokat
-                          </>
-                        )}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setEditingWord(null);
-                          setMeaningDraft('');
-                        }}
-                        className="p-1.5 rounded-lg text-slate-500 hover:text-slate-800 hover:bg-white cursor-pointer"
-                        title="Tutup editor"
-                      >
-                        <X className="w-4 h-4" />
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="flex flex-col sm:flex-row gap-2">
-                    <input
-                      ref={meaningInputRef}
-                      type="text"
-                      value={meaningDraft}
-                      onChange={(e) => setMeaningDraft(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Escape') {
-                          setEditingWord(null);
-                          setMeaningDraft('');
-                        }
-                      }}
-                      placeholder="Tulis arti kata ini (contoh: rumah, pergi, buku...)"
-                      className="flex-1 px-3.5 py-2 rounded-xl border border-emerald-300 bg-white text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                    />
-                    <div className="flex items-center gap-2">
-                      <button
-                        type="submit"
-                        className="inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl text-sm font-semibold bg-emerald-600 text-white hover:bg-emerald-700 transition-colors cursor-pointer"
-                      >
-                        <Check className="w-4 h-4" />
-                        Simpan Arti
-                      </button>
-                      {currentItemMeanings[String(editingWord.tokenIndex)] && (
-                        <button
-                          type="button"
-                          onClick={() =>
-                            handleDeleteWordMeaning(editingWord.tokenIndex)
-                          }
-                          className="inline-flex items-center justify-center gap-1 px-3 py-2 rounded-xl text-sm font-semibold bg-white text-rose-600 border border-rose-200 hover:bg-rose-50 transition-colors cursor-pointer"
-                          title="Hapus arti kata ini"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                          <span className="hidden sm:inline">Hapus</span>
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                </form>
-              )}
-
-              {/* Daftar Kosakata / Arti Kata di Nomor Ini */}
-              {currentMeaningEntries.length > 0 && (
-                <div className="mt-3 rounded-2xl bg-slate-50/90 border border-slate-200/80 p-3.5">
-                  <div className="flex items-center justify-between gap-2 mb-2">
-                    <span className="inline-flex items-center gap-1.5 text-xs font-bold text-slate-700">
-                      <BookMarked className="w-3.5 h-3.5 text-emerald-700" />
-                      Catatan Arti Kata ({currentMeaningEntries.length})
-                    </span>
-                    <span className="text-[11px] text-slate-500">
-                      Klik chip untuk edit arti
-                    </span>
-                  </div>
-                  <div className="flex flex-wrap gap-1.5">
-                    {currentMeaningEntries.map((entry) => (
-                      <button
-                        key={entry.tokenIndex}
-                        type="button"
-                        onClick={() =>
-                          openWordMeaningEditor(
-                            entry.tokenIndex,
-                            entry.arabicWord
-                          )
-                        }
-                        className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-white border border-slate-200 hover:border-emerald-300 hover:bg-emerald-50/60 text-xs transition-colors cursor-pointer"
-                      >
-                        <span
-                          dir="rtl"
-                          lang="ar"
-                          className="font-arabic text-base text-slate-900"
-                        >
-                          {entry.arabicWord}
-                        </span>
-                        <span className="text-slate-400">=</span>
-                        <span className="font-semibold text-emerald-800">
-                          {entry.meaning}
-                        </span>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
-
               <div className="mt-2.5 flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-[11px] text-slate-500">
                 <span>
-                  {wordClickMode === 'meaning'
-                    ? 'Mode Beri Arti aktif — klik kata Arab mana saja untuk menulis atau mengedit artinya.'
-                    : harakatLevel === 0
+                  {harakatLevel === 0
                     ? 'Mode gundul (0%) aktif — klik kata tertentu jika ingin melihat harokatnya.'
                     : harakatLevel === 50
                     ? 'Mode sebagian (50%) aktif — klik kata mana saja untuk tampil/sembunyikan harokatnya.'
-                    : 'Mode Ubah Harokat aktif — klik kata mana saja untuk menyembunyikan harokat kata tersebut.'}
+                    : 'Klik kata mana saja untuk menyembunyikan harokat kata tersebut.'}
                 </span>
                 {hasWordOverrides && (
                   <button
