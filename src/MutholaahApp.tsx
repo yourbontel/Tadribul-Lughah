@@ -40,6 +40,7 @@ function resolveProgressOwnerKey(): string {
 
 type ArabicFontSize = 'md' | 'lg' | 'xl';
 type HarakatLevel = 100 | 50 | 0;
+type WordHarakatState = 'full' | 'partial' | 'none';
 
 const ARABIC_SIZE_CLASSES: Record<ArabicFontSize, string> = {
   md: 'text-2xl sm:text-[1.75rem]',
@@ -56,8 +57,42 @@ function stripArabicHarakat(text: string): string {
 }
 
 /**
- * Hash sederhana untuk menghasilkan urutan acak yang konsisten per item & seed.
+ * Menghapus sebagian harokat di dalam satu kata (misal tersisa 1-2 harokat per kata),
+ * dengan mengelompokkan tanda baca pada satu huruf agar tidak terpecah janggal.
  */
+function stripPartialWordHarakat(word: string, rng: () => number): string {
+  const clusterRegex = /[\u064B-\u065F\u0670]+/g;
+  const matches: Array<{ index: number; text: string }> = [];
+  let m: RegExpExecArray | null;
+  while ((m = clusterRegex.exec(word)) !== null) {
+    matches.push({ index: m.index, text: m[0] });
+  }
+  if (matches.length === 0) return word;
+  if (matches.length === 1) {
+    // Kata dengan 1 harokat: kadang tampil kadang hilang sesuai acakan
+    return rng() < 0.5 ? word : stripArabicHarakat(word);
+  }
+
+  const keepCount = Math.max(1, Math.floor(matches.length / 2));
+  const indices = matches.map((_, i) => i);
+  for (let i = indices.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1));
+    [indices[i], indices[j]] = [indices[j], indices[i]];
+  }
+  const keepSet = new Set(indices.slice(0, keepCount));
+
+  let result = '';
+  let cursor = 0;
+  matches.forEach((match, i) => {
+    result += word.slice(cursor, match.index);
+    if (keepSet.has(i)) {
+      result += match.text;
+    }
+    cursor = match.index + match.text.length;
+  });
+  result += word.slice(cursor);
+  return result;
+}
 function seededRandom(seedStr: string): () => number {
   let h = 2166136261;
   for (let i = 0; i < seedStr.length; i++) {
@@ -131,7 +166,7 @@ export function MutholaahApp() {
   const [harakatLevel, setHarakatLevel] = useState<HarakatLevel>(100);
   const [shuffleSeed, setShuffleSeed] = useState<number>(0);
   const [wordHarakatOverrides, setWordHarakatOverrides] = useState<
-    Record<number, boolean>
+    Record<number, WordHarakatState>
   >({});
   const [showTranslation, setShowTranslation] = useState<boolean>(false);
   const [showNumberGrid, setShowNumberGrid] = useState<boolean>(false);
@@ -304,35 +339,20 @@ export function MutholaahApp() {
     [currentItem]
   );
 
-  const baseHiddenWordIndices = useMemo(() => {
-    const hidden = new Set<number>();
-    if (!currentItem || harakatLevel === 100) return hidden;
-
-    const wordIndices: number[] = [];
+  const partialWordVariants = useMemo(() => {
+    const map = new Map<number, string>();
+    if (!currentItem) return map;
     arabicTokens.forEach((tok, idx) => {
       if (tok && !/^\s+$/.test(tok) && /[\u0600-\u06FF]/.test(tok)) {
-        wordIndices.push(idx);
+        const rng = seededRandom(`${currentItem.id}:${idx}:${shuffleSeed}`);
+        map.set(idx, stripPartialWordHarakat(tok, rng));
       }
     });
+    return map;
+  }, [arabicTokens, currentItem, shuffleSeed]);
 
-    if (harakatLevel === 0) {
-      wordIndices.forEach((idx) => hidden.add(idx));
-      return hidden;
-    }
-
-    // Mode 50%: acak setengah kata untuk digundulkan
-    const rng = seededRandom(`${currentItem.id}:${shuffleSeed}`);
-    const shuffled = [...wordIndices];
-    for (let i = shuffled.length - 1; i > 0; i--) {
-      const j = Math.floor(rng() * (i + 1));
-      [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
-    }
-    const hideCount = Math.ceil(shuffled.length / 2);
-    for (let i = 0; i < hideCount; i++) {
-      hidden.add(shuffled[i]);
-    }
-    return hidden;
-  }, [arabicTokens, currentItem, harakatLevel, shuffleSeed]);
+  const baseWordState: WordHarakatState =
+    harakatLevel === 100 ? 'full' : harakatLevel === 50 ? 'partial' : 'none';
 
   const handleSelectHarakatLevel = (level: HarakatLevel) => {
     setHarakatLevel(level);
@@ -340,13 +360,12 @@ export function MutholaahApp() {
   };
 
   const toggleWordHarakat = (tokenIndex: number) => {
-    const currentlyHidden =
-      tokenIndex in wordHarakatOverrides
-        ? wordHarakatOverrides[tokenIndex]
-        : baseHiddenWordIndices.has(tokenIndex);
+    const currentState = wordHarakatOverrides[tokenIndex] ?? baseWordState;
+    const nextState: WordHarakatState =
+      currentState === 'full' ? 'none' : 'full';
     setWordHarakatOverrides((prev) => ({
       ...prev,
-      [tokenIndex]: !currentlyHidden
+      [tokenIndex]: nextState
     }));
   };
 
@@ -667,23 +686,25 @@ export function MutholaahApp() {
                   if (!isArabicWord) {
                     return <React.Fragment key={idx}>{tok}</React.Fragment>;
                   }
-                  const isHidden =
-                    idx in wordHarakatOverrides
-                      ? wordHarakatOverrides[idx]
-                      : baseHiddenWordIndices.has(idx);
-                  const displayWord = isHidden ? stripArabicHarakat(tok) : tok;
+                  const wordState = wordHarakatOverrides[idx] ?? baseWordState;
+                  const displayWord =
+                    wordState === 'full'
+                      ? tok
+                      : wordState === 'partial'
+                      ? partialWordVariants.get(idx) ?? tok
+                      : stripArabicHarakat(tok);
                   return (
                     <button
                       key={idx}
                       type="button"
                       onClick={() => toggleWordHarakat(idx)}
                       title={
-                        isHidden
-                          ? 'Klik untuk tampilkan harokat kata ini'
-                          : 'Klik untuk sembunyikan harokat kata ini'
+                        wordState === 'full'
+                          ? 'Klik untuk sembunyikan harokat kata ini'
+                          : 'Klik untuk tampilkan semua harokat kata ini'
                       }
                       className={`inline bg-transparent border-0 p-0 font-inherit text-inherit rounded-md px-0.5 transition-colors cursor-pointer hover:bg-amber-200/45 ${
-                        isHidden ? 'text-slate-800' : ''
+                        wordState === 'none' ? 'text-slate-800' : ''
                       }`}
                     >
                       {displayWord}
